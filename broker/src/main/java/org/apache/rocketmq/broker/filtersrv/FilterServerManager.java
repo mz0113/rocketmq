@@ -64,6 +64,10 @@ public class FilterServerManager {
         }, 1000 * 5, 1000 * 30, TimeUnit.MILLISECONDS);
     }
 
+    /**
+     * 检查filterSrv进程数量,如过低的话自动调用sh命令拉起来新的进程
+     * 这里其实可以看出来filterSrv进程是broker启动后自动拉起来的
+     */
     public void createFilterServer() {
         int more =
             this.brokerController.getBrokerConfig().getFilterServerNums() - this.filterServerTable.size();
@@ -98,6 +102,11 @@ public class FilterServerManager {
         this.scheduledExecutorService.shutdown();
     }
 
+    /**
+     * mz 这个是干嘛的,是在filerSrv进程启动后接受它的注册请求的把
+     * @param channel
+     * @param filterServerAddr
+     */
     public void registerFilterServer(final Channel channel, final String filterServerAddr) {
         FilterServerInfo filterServerInfo = this.filterServerTable.get(channel);
         if (filterServerInfo != null) {
@@ -111,6 +120,9 @@ public class FilterServerManager {
         }
     }
 
+    /**
+     * mz 超时监测filterServerTable
+     */
     public void scanNotActiveChannel() {
 
         Iterator<Entry<Channel, FilterServerInfo>> it = this.filterServerTable.entrySet().iterator();
@@ -145,7 +157,14 @@ public class FilterServerManager {
     }
 
     static class FilterServerInfo {
+        /**
+         * filterServer服务器地址
+         */
         private String filterServerAddr;
+        /**
+         * filterServer上次发送心跳包时间，FilterServer与Broker通过心跳维持FilterServer在Broker端的注册
+         * 同样在Broker每隔10s扫描一下该注册表
+         */
         private long lastUpdateTimestamp;
 
         public String getFilterServerAddr() {

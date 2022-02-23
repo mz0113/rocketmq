@@ -100,6 +100,9 @@ public class MQClientInstance {
     private final ConcurrentMap<String/* Topic */, TopicRouteData> topicRouteTable = new ConcurrentHashMap<String, TopicRouteData>();
     private final Lock lockNamesrv = new ReentrantLock();
     private final Lock lockHeartbeat = new ReentrantLock();
+    /**
+     * mz updateTopicRouteInfoFromNameServer时候拉取到的信息
+     */
     private final ConcurrentMap<String/* Broker Name */, HashMap<Long/* brokerId */, String/* address */>> brokerAddrTable =
         new ConcurrentHashMap<String, HashMap<Long, String>>();
     private final ConcurrentMap<String/* Broker Name */, HashMap<String/* address */, Integer>> brokerVersionTable =
@@ -157,12 +160,22 @@ public class MQClientInstance {
             MQVersion.getVersionDesc(MQVersion.CURRENT_VERSION), RemotingCommand.getSerializeTypeConfigInThisServer());
     }
 
+    /**
+     * 转换数据格式 topicRouteData 变成  TopicPublishInfo 对象
+     * @param topic
+     * @param route
+     * @return
+     */
     public static TopicPublishInfo topicRouteData2TopicPublishInfo(final String topic, final TopicRouteData route) {
         TopicPublishInfo info = new TopicPublishInfo();
         info.setTopicRouteData(route);
+        //mz route.getOrderTopicConf() org.apache.rocketmq.common.namesrv.NamesrvUtil.NAMESPACE_ORDER_TOPIC_CONFIG
         if (route.getOrderTopicConf() != null && route.getOrderTopicConf().length() > 0) {
+            //mz 这个里面居然是broker的地址?
             String[] brokers = route.getOrderTopicConf().split(";");
             for (String broker : brokers) {
+                //item[0]是brokerName
+                //item[1]是queue的数量
                 String[] item = broker.split(":");
                 int nums = Integer.parseInt(item[1]);
                 for (int i = 0; i < nums; i++) {
@@ -583,9 +596,13 @@ public class MQClientInstance {
         while (it.hasNext()) {
             Entry<String, MQConsumerInner> next = it.next();
             MQConsumerInner consumer = next.getValue();
+            //mz push模式
             if (ConsumeType.CONSUME_PASSIVELY == consumer.consumeType()) {
+                //执行subscribe方法时候已经把订阅元数据放入this.rebalanceImpl.getSubscriptionInner()中了
+                //consumer.subscriptions() => this.rebalanceImpl.getSubscriptionInner().values()
                 Set<SubscriptionData> subscriptions = consumer.subscriptions();
                 for (SubscriptionData sub : subscriptions) {
+                    //mz subscribe 时候已经set了getFilterClassSource()了
                     if (sub.isClassFilterMode() && sub.getFilterClassSource() != null) {
                         final String consumerGroup = consumer.groupName();
                         final String className = sub.getSubString();
@@ -609,6 +626,7 @@ public class MQClientInstance {
                 try {
                     TopicRouteData topicRouteData;
                     if (isDefault && defaultMQProducer != null) {
+                        //mz 只有生产者才会进来 defaultMQProducer != null 和自动创建主题有关系
                         topicRouteData = this.mQClientAPIImpl.getDefaultTopicRouteInfoFromNameServer(defaultMQProducer.getCreateTopicKey(),
                             1000 * 3);
                         if (topicRouteData != null) {
@@ -646,6 +664,7 @@ public class MQClientInstance {
                                     Entry<String, MQProducerInner> entry = it.next();
                                     MQProducerInner impl = entry.getValue();
                                     if (impl != null) {
+                                        //mz 更新map缓存
                                         impl.updateTopicPublishInfo(topic, publishInfo);
                                     }
                                 }
@@ -749,6 +768,7 @@ public class MQClientInstance {
     private void uploadFilterClassToAllFilterServer(final String consumerGroup, final String fullClassName,
         final String topic,
         final String filterClassSource) throws UnsupportedEncodingException {
+
         byte[] classBody = null;
         int classCRC = 0;
         try {
@@ -764,10 +784,13 @@ public class MQClientInstance {
         if (topicRouteData != null
             && topicRouteData.getFilterServerTable() != null && !topicRouteData.getFilterServerTable().isEmpty()) {
             Iterator<Entry<String, List<String>>> it = topicRouteData.getFilterServerTable().entrySet().iterator();
+            //mz private HashMap<String/* brokerAddr */, List<String>/* Filter Server */> filterServerTable;
+            //FilterServer是依附于Broker消息服务器的，多个FilterServer共同从Broker上拉取消息
             while (it.hasNext()) {
                 Entry<String, List<String>> next = it.next();
                 List<String> value = next.getValue();
                 for (final String fsAddr : value) {
+                    //fsAddr:filterServer的地址,其实主要是端口不一样吧，ip应该都是一样的。
                     try {
                         this.mQClientAPIImpl.registerMessageFilterClass(fsAddr, consumerGroup, topic, fullClassName, classCRC, classBody,
                             5000);

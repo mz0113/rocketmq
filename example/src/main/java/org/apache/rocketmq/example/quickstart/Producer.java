@@ -31,9 +31,9 @@ public class Producer {
         /*
          * Instantiate with a producer group name.
          */
-        DefaultMQProducer producer = new DefaultMQProducer("please_rename_unique_group_name");
-
-        /*
+        DefaultMQProducer producer = new DefaultMQProducer("producerGrp1");
+        producer.setNamesrvAddr("127.0.0.1:9876");
+/*
          * Specify name server addresses.
          * <p/>
          *
@@ -43,7 +43,7 @@ public class Producer {
          * producer.setNamesrvAddr("name-server1-ip:9876;name-server2-ip:9876");
          * }
          * </pre>
-         */
+*/
 
         /*
          * Launch the instance.
