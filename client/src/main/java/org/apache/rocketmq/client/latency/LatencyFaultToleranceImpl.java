@@ -24,8 +24,11 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import org.apache.rocketmq.client.common.ThreadLocalIndex;
 
+/**
+ * latencyMax，根据currentLatency本次消息发送延迟，从latencyMax尾部向前找到第一个比currentLatency小的索引index，如果没有找到，返回0。然后根据这个索引从notAvailableDuration数组中取出对应的时间，在这个时长内，Broker将设置为不可用。
+ */
 public class LatencyFaultToleranceImpl implements LatencyFaultTolerance<String> {
-    private final ConcurrentHashMap<String, FaultItem> faultItemTable = new ConcurrentHashMap<String, FaultItem>(16);
+    private final ConcurrentHashMap<String/*brokerName*/, FaultItem> faultItemTable = new ConcurrentHashMap<String, FaultItem>(16);
 
     private final ThreadLocalIndex whichItemWorst = new ThreadLocalIndex();
 
@@ -52,6 +55,9 @@ public class LatencyFaultToleranceImpl implements LatencyFaultTolerance<String> 
     public boolean isAvailable(final String name) {
         final FaultItem faultItem = this.faultItemTable.get(name);
         if (faultItem != null) {
+            /**
+             * 检查时间是否已过,过了的话就表示已恢复，然后选出来试试看
+             */
             return faultItem.isAvailable();
         }
         return true;
@@ -72,8 +78,9 @@ public class LatencyFaultToleranceImpl implements LatencyFaultTolerance<String> 
         }
 
         if (!tmpList.isEmpty()) {
+            //mz 打乱
             Collections.shuffle(tmpList);
-
+            //重排序 看不懂,为什么不直接排序...
             Collections.sort(tmpList);
 
             final int half = tmpList.size() / 2;

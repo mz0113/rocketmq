@@ -122,6 +122,8 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
      * messages born prior to {@link #consumeTimestamp} will be ignored
      * </li>
      * </ul>
+     *
+     * mz 注意：如果从消息进度服务OffsetStore读取到MessageQueue中的偏移量不小于0，则使用读取到的偏移量，只有在读到的偏移量小于0时，上述策略才会生效
      */
     private ConsumeFromWhere consumeFromWhere = ConsumeFromWhere.CONSUME_FROM_LAST_OFFSET;
 
@@ -130,16 +132,21 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
      * 20131223171201<br>
      * Implying Seventeen twelve and 01 seconds on December 23, 2013 year<br>
      * Default backtracking consumption time Half an hour ago.
+     *
+     * mz 半小时前
      */
     private String consumeTimestamp = UtilAll.timeMillisToHumanString3(System.currentTimeMillis() - (1000 * 60 * 30));
 
     /**
      * Queue allocation algorithm specifying how message queues are allocated to each consumer clients.
+     * mz allocateMessageQueueStrategy：集群模式下消息队列负载策略
      */
     private AllocateMessageQueueStrategy allocateMessageQueueStrategy;
 
     /**
      * Subscription relationship
+     * mz 订阅的消息过滤表达式把
+     * 这个里面不含自动订阅的重试主题,是在org.apache.rocketmq.client.impl.consumer.RebalanceImpl#subscriptionInner中才有重试主题的订阅
      */
     private Map<String /* topic */, String /* sub expression */> subscription = new HashMap<String, String>();
 
@@ -150,32 +157,41 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
 
     /**
      * Offset Storage
+     * mz 消费进度存储器
      */
     private OffsetStore offsetStore;
 
     /**
      * Minimum consumer thread number
+     * mz 其实就是core线程的数量
      */
     private int consumeThreadMin = 20;
 
     /**
      * Max consumer thread number
+     * mz 消费者最大线程数，由于消费者线程池使用无界队列，故消费者线程个数其实最多只有consumeThreadMin个
      */
     private int consumeThreadMax = 20;
 
     /**
      * Threshold for dynamic adjustment of the number of thread pool
+     * TODO mz 不知道干嘛的
      */
     private long adjustThreadPoolNumsThreshold = 100000;
 
     /**
      * Concurrently max span offset.it has no effect on sequential consumption
+     * mz 并发消息消费时处理队列最大跨度，默认2000
+     * 表示如果消息处理队列中偏移量最大的消息与偏移量最小的消息的跨度超过2000则延迟50毫秒后再拉取消息
+     * 对顺序消费无效
      */
     private int consumeConcurrentlyMaxSpan = 2000;
 
     /**
      * Flow control threshold on queue level, each message queue will cache at most 1000 messages by default,
      * Consider the {@code pullBatchSize}, the instantaneous value may exceed the limit
+     *
+     * 默认值1000，每1000次流控后打印流控日志。就是说queue里面不能保存超过1K条消息把，否则就不再继续拉消息的意思把。
      */
     private int pullThresholdForQueue = 1000;
 
@@ -185,6 +201,8 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
      *
      * <p>
      * The size of a message only measured by message body, so it's not accurate
+     *
+     * 也是流控所需的，最大保存100MB,但是不是很准确。
      */
     private int pullThresholdSizeForQueue = 100;
 
@@ -196,6 +214,8 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
      * <p>
      * For example, if the value of pullThresholdForTopic is 1000 and 10 message queues are assigned to this consumer,
      * then pullThresholdForQueue will be set to 100
+     *
+     * mz topic维度下的流控 整个topic拉下来的消息不能超过上限。
      */
     private int pullThresholdForTopic = -1;
 
@@ -207,6 +227,8 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
      * <p>
      * For example, if the value of pullThresholdSizeForTopic is 1000 MiB and 10 message queues are
      * assigned to this consumer, then pullThresholdSizeForQueue will be set to 100 MiB
+     *
+     * 按MB计算
      */
     private int pullThresholdSizeForTopic = -1;
 
@@ -217,16 +239,20 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
 
     /**
      * Batch consumption size
+     * mz 消息并发消费时一次消费消息条数，通俗点说就是每次传入MessageListtener#consumeMessage中的消息条数
      */
     private int consumeMessageBatchMaxSize = 1;
 
     /**
      * Batch pull size
+     * mz 每次消息拉取所拉取的条数，默认32条
      */
     private int pullBatchSize = 32;
 
     /**
      * Whether update subscription relationship when every pull
+     * mz 是否每次拉取消息都更新订阅信息，默认为false
+     *
      */
     private boolean postSubscriptionWhenPull = false;
 
@@ -241,16 +267,20 @@ public class DefaultMQPushConsumer extends ClientConfig implements MQPushConsume
      *
      * If messages are re-consumed more than {@link #maxReconsumeTimes} before success, it's be directed to a deletion
      * queue waiting.
+     * mz 默认16，启动时会被覆盖这个值的 clienConfig中默认16
      */
     private int maxReconsumeTimes = -1;
 
     /**
      * Suspending pulling time for cases requiring slow pulling like flow-control scenario.
+     * mz 延迟将该队列的消息提交到消费者线程的等待时间，默认延迟1s
+     * 消费者可以暂停消费一小会儿,这个就是暂停的时间
      */
     private long suspendCurrentQueueTimeMillis = 1000;
 
     /**
      * Maximum amount of time in minutes a message may block the consuming thread.
+     * mz 客户端消息消费超时时间，默认为15，单位为分钟
      */
     private long consumeTimeout = 15;
 

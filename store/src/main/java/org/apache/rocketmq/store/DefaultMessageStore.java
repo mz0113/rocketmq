@@ -98,6 +98,9 @@ public class DefaultMessageStore implements MessageStore {
     private final ScheduledExecutorService scheduledExecutorService =
         Executors.newSingleThreadScheduledExecutor(new ThreadFactoryImpl("StoreScheduledThread"));
     private final BrokerStatsManager brokerStatsManager;
+    /**
+     * 消息拉取长轮询模式消息达到监听器
+     */
     private final MessageArrivingListener messageArrivingListener;
     private final BrokerConfig brokerConfig;
 
@@ -575,11 +578,13 @@ public class DefaultMessageStore implements MessageStore {
 
         final long maxOffsetPy = this.commitLog.getMaxOffset();
 
+        //consumeQueue文件把
         ConsumeQueue consumeQueue = findConsumeQueue(topic, queueId);
         if (consumeQueue != null) {
             minOffset = consumeQueue.getMinOffsetInQueue();
             maxOffset = consumeQueue.getMaxOffsetInQueue();
 
+            //同时还会纠正下次拉取的偏移量！ nextOffsetCorrection
             if (maxOffset == 0) {
                 status = GetMessageStatus.NO_MESSAGE_IN_QUEUE;
                 nextBeginOffset = nextOffsetCorrection(offset, 0);
@@ -597,6 +602,7 @@ public class DefaultMessageStore implements MessageStore {
                     nextBeginOffset = nextOffsetCorrection(offset, maxOffset);
                 }
             } else {
+                //前面都是校验,这里才是正儿八经的代码 直接看这里
                 SelectMappedBufferResult bufferConsumeQueue = consumeQueue.getIndexBuffer(offset);
                 if (bufferConsumeQueue != null) {
                     try {
@@ -686,6 +692,7 @@ public class DefaultMessageStore implements MessageStore {
                         long diff = maxOffsetPy - maxPhyOffsetPulling;
                         long memory = (long) (StoreUtil.TOTAL_PHYSICAL_MEMORY_SIZE
                             * (this.messageStoreConfig.getAccessMessageInMemoryMaxRatio() / 100.0));
+                        //建议从slave节点拉取消息，而且只会有brokerID=1的从节点会可读,其他从节点是不可读的
                         getResult.setSuggestPullingFromSlave(diff > memory);
                     } finally {
 
@@ -1939,6 +1946,10 @@ public class DefaultMessageStore implements MessageStore {
 
                                     if (BrokerRole.SLAVE != DefaultMessageStore.this.getMessageStoreConfig().getBrokerRole()
                                         && DefaultMessageStore.this.brokerConfig.isLongPollingEnable()) {
+                                        //启用了长轮询 通知消息到达
+                                        //当新消息达到CommitLog时，ReputMessageService线程负责将消息转发给Consume-Queue、IndexFile，
+                                        // 如果Broker端开启了长轮询模式并且角色主节点，则最终将调用Pull-Request HoldService线程的notifyMessageArriving方法唤醒挂起线程，判
+                                        // 断当前消费队列最大偏移量是否大于待拉取偏移量，如果大于则拉取消息。长轮询模式使得消息拉取能实现准实时
                                         DefaultMessageStore.this.messageArrivingListener.arriving(dispatchRequest.getTopic(),
                                             dispatchRequest.getQueueId(), dispatchRequest.getConsumeQueueOffset() + 1,
                                             dispatchRequest.getTagsCode(), dispatchRequest.getStoreTimestamp(),

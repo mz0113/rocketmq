@@ -22,6 +22,12 @@ import java.util.Iterator;
 import java.util.List;
 import org.apache.rocketmq.common.MixAll;
 
+/**
+ * 首先在消息发送端，调用batch方法，将一批消息封装成MessageBatch对象。Message-Batch继承自Message对象，
+ * MessageBatch内部持有List<Message>messages。
+ * 这样的话，批量消息发送与单条消息发送的处理流程完全一样。
+ * MessageBatch只需要将该集合中的每条消息的消息体body聚合成一个byte[]数值，在消息服务端能够从该byte[]数值中正确解析出消息即可
+ */
 public class MessageBatch extends Message implements Iterable<Message> {
 
     private static final long serialVersionUID = 621335151046335557L;
@@ -48,6 +54,7 @@ public class MessageBatch extends Message implements Iterable<Message> {
             if (message.getDelayTimeLevel() > 0) {
                 throw new UnsupportedOperationException("TimeDelayLevel is not supported for batching");
             }
+            //mz 批量消息不支持重试队列的发送
             if (message.getTopic().startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
                 throw new UnsupportedOperationException("Retry Group is not supported for batching");
             }

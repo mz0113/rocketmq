@@ -18,10 +18,16 @@ package org.apache.rocketmq.common.message;
 
 import java.io.Serializable;
 
+/**
+ * MQClientInstance#topicRouteData2TopicPublishInfo(java.lang.String, org.apache.rocketmq.common.protocol.route.TopicRouteData)
+ */
 public class MessageQueue implements Comparable<MessageQueue>, Serializable {
     private static final long serialVersionUID = 6191200464116433425L;
     private String topic;
     private String brokerName;
+    /**
+     * 自增ID
+     */
     private int queueId;
 
     public MessageQueue() {
