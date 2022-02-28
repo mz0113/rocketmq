@@ -281,12 +281,14 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                     this.getConsumerStatsManager().incConsumeFailedTPS(consumerGroup, consumeRequest.getMessageQueue().getTopic(), msgs.size());
                     if (checkReconsumeTimes(msgs)) {
                         consumeRequest.getProcessQueue().makeMessageToCosumeAgain(msgs);
+                        //继续消费,又回到了刚开始消费的入口，重新从processQueue中取一个batchCount的消息进行处理，这里也就意味着极有可能重复处理
                         this.submitConsumeRequestLater(
                             consumeRequest.getProcessQueue(),
                             consumeRequest.getMessageQueue(),
                             context.getSuspendCurrentQueueTimeMillis());
                         continueConsume = false;
                     } else {
+                        //如果所有消息都到达了重试次数最大限制，则没办法了就只能提交位移了
                         commitOffset = consumeRequest.getProcessQueue().commit();
                     }
                     break;
@@ -302,6 +304,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                     commitOffset = consumeRequest.getProcessQueue().commit();
                     break;
                 case ROLLBACK:
+                    //this.consumingMsgOrderlyTreeMap 再放回到msgTreeMap中然后重新消费
                     consumeRequest.getProcessQueue().rollback();
                     this.submitConsumeRequestLater(
                         consumeRequest.getProcessQueue(),
@@ -325,6 +328,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
             }
         }
 
+        //先把位移提交到本地缓存，等待定时任务上传到broker端上
         if (commitOffset >= 0 && !consumeRequest.getProcessQueue().isDropped()) {
             this.defaultMQPushConsumerImpl.getOffsetStore().updateOffset(consumeRequest.getMessageQueue(), commitOffset, false);
         }
@@ -345,13 +349,21 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
         }
     }
 
+    /**
+     * 这里发现是判断整个消息集合的,也就是只要有1条消息还未到达重试次数最大限制就继续消费这一批消息！
+     * @param msgs
+     * @return true，则继续消费，false，立刻提交位移
+     */
     private boolean checkReconsumeTimes(List<MessageExt> msgs) {
+        //默认提交位移
         boolean suspend = false;
         if (msgs != null && !msgs.isEmpty()) {
             for (MessageExt msg : msgs) {
-                if (msg.getReconsumeTimes() >= getMaxReconsumeTimes()) {
+                //TODO mz 手工改了5
+                if (msg.getReconsumeTimes() >= 5) {
                     MessageAccessor.setReconsumeTime(msg, String.valueOf(msg.getReconsumeTimes()));
                     if (!sendMessageBack(msg)) {
+                        //如果发回broker失败了，则兜底还是继续消费！
                         suspend = true;
                         msg.setReconsumeTimes(msg.getReconsumeTimes() + 1);
                     }
@@ -453,7 +465,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                         final int consumeBatchSize =
                             ConsumeMessageOrderlyService.this.defaultMQPushConsumer.getConsumeMessageBatchMaxSize();
 
-                        List<MessageExt> msgs = this.processQueue.takeMessages(consumeBatchSize);
+                        List<MessageExt> msgs = this.processQueue.takeMessages(3);
                         defaultMQPushConsumerImpl.resetRetryAndNamespace(msgs, defaultMQPushConsumer.getConsumerGroup());
                         if (!msgs.isEmpty()) {
                             final ConsumeOrderlyContext context = new ConsumeOrderlyContext(this.messageQueue);

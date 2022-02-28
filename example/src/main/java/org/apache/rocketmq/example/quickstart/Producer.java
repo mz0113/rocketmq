@@ -18,9 +18,13 @@ package org.apache.rocketmq.example.quickstart;
 
 import org.apache.rocketmq.client.exception.MQClientException;
 import org.apache.rocketmq.client.producer.DefaultMQProducer;
+import org.apache.rocketmq.client.producer.MessageQueueSelector;
 import org.apache.rocketmq.client.producer.SendResult;
 import org.apache.rocketmq.common.message.Message;
+import org.apache.rocketmq.common.message.MessageQueue;
 import org.apache.rocketmq.remoting.common.RemotingHelper;
+
+import java.util.List;
 
 /**
  * This class demonstrates how to send messages to brokers using provided {@link DefaultMQProducer}.
@@ -32,7 +36,7 @@ public class Producer {
          * Instantiate with a producer group name.
          */
         DefaultMQProducer producer = new DefaultMQProducer("producerGrp1");
-        producer.setNamesrvAddr("127.0.0.1:9876");
+        producer.setNamesrvAddr("172.17.39.185:9876");
 /*
          * Specify name server addresses.
          * <p/>
@@ -50,13 +54,13 @@ public class Producer {
          */
         producer.start();
 
-        for (int i = 0; i < 1000; i++) {
+        for (int i = 0; i < 5; i++) {
             try {
 
                 /*
                  * Create a message instance, specifying topic, tag and message body.
                  */
-                Message msg = new Message("TopicTest" /* Topic */,
+                Message msg = new Message("test-topic" /* Topic */,
                     "TagA" /* Tag */,
                     ("Hello RocketMQ " + i).getBytes(RemotingHelper.DEFAULT_CHARSET) /* Message body */
                 );
@@ -64,7 +68,12 @@ public class Producer {
                 /*
                  * Call send message to deliver message to one of brokers.
                  */
-                SendResult sendResult = producer.send(msg);
+                SendResult sendResult = producer.send(msg, new MessageQueueSelector() {
+                    @Override
+                    public MessageQueue select(List<MessageQueue> mqs, Message msg, Object arg) {
+                        return mqs.get(0);
+                    }
+                },0);
 
                 System.out.printf("%s%n", sendResult);
             } catch (Exception e) {
