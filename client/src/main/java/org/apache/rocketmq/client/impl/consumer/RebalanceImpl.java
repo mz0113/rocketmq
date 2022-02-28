@@ -140,6 +140,11 @@ public abstract class RebalanceImpl {
         return result;
     }
 
+    /**
+     * 对broker段的messageQueue加锁,然后给processQueue设置locked状态为true
+     * @param mq
+     * @return
+     */
     public boolean lock(final MessageQueue mq) {
         FindBrokerResult findBrokerResult = this.mQClientFactory.findBrokerAddressInSubscribe(mq.getBrokerName(), MixAll.MASTER_ID, true);
         if (findBrokerResult != null) {
@@ -152,6 +157,7 @@ public abstract class RebalanceImpl {
                 Set<MessageQueue> lockedMq =
                     this.mQClientFactory.getMQClientAPIImpl().lockBatchMQ(findBrokerResult.getBrokerAddr(), requestBody, 1000);
                 for (MessageQueue mmqq : lockedMq) {
+                    //注意这里还有个缓存table用以映射processQueue
                     ProcessQueue processQueue = this.processQueueTable.get(mmqq);
                     if (processQueue != null) {
                         processQueue.setLocked(true);
@@ -402,7 +408,9 @@ public abstract class RebalanceImpl {
         List<PullRequest> pullRequestList = new ArrayList<PullRequest>();
         for (MessageQueue mq : mqSet) {
             if (!this.processQueueTable.containsKey(mq)) {
-                //mz RPC向broker进行messageQueue的加锁
+                //mz RPC向broker进行messageQueue的加锁 如果加锁失败,说明别人还持有broker端的锁
+                //此时显然不应该去发起这个queue的pull请求,因为别人还在消费呢!顺序消费下可能会造成乱序,倒不是因为怕重复,应该就是怕乱序
+                //如果是并发消费为什么就可以呢?因为并发消费在pull下来消息后消费时候不怕乱序.重复倒是无所谓,反正幂等本身业务就需要做
                 if (isOrder && !this.lock(mq)) {
                     log.warn("doRebalance, {}, add a new mq failed, {}, because lock failed", consumerGroup, mq);
                     continue;

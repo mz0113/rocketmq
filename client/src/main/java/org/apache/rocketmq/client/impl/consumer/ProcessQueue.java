@@ -245,6 +245,7 @@ public class ProcessQueue {
                     msgCount.addAndGet(removedCnt);
 
                     if (!msgTreeMap.isEmpty()) {
+                        //注意这里是第一个元素,也就是最小位移
                         result = msgTreeMap.firstKey();
                     }
                 }
