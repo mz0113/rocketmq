@@ -32,6 +32,7 @@ public class TopicConfigSerializeWrapper extends RemotingSerializable {
         return topicConfigTable;
     }
 
+    //启动后会有一些默认的topic被set进来,在controller的initial()中
     public void setTopicConfigTable(ConcurrentMap<String, TopicConfig> topicConfigTable) {
         this.topicConfigTable = topicConfigTable;
     }

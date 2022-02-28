@@ -1344,6 +1344,7 @@ public class MQClientAPIImpl {
     public TopicRouteData getDefaultTopicRouteInfoFromNameServer(final String topic, final long timeoutMillis)
         throws RemotingException, MQClientException, InterruptedException {
 
+        //TODO why allowTopicNotExist = false ?
         return getTopicRouteInfoFromNameServer(topic, timeoutMillis, false);
     }
 
