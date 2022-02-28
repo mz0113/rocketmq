@@ -50,6 +50,7 @@ public class ConsumerFilterManager extends ConfigManager {
         filterDataByTopic = new ConcurrentHashMap<String/*Topic*/, FilterDataMapByTopic>(256);
 
     private transient BrokerController brokerController;
+    //TODO mz 布隆过滤器 但还不知道其作用
     private transient BloomFilter bloomFilter;
 
     public ConsumerFilterManager() {

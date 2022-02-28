@@ -81,6 +81,7 @@ public class PullAPIWrapper {
                 msgListFilterAgain = new ArrayList<MessageExt>(msgList.size());
                 for (MessageExt msg : msgList) {
                     if (msg.getTags() != null) {
+                        //精确比对消息的tag进行过滤
                         if (subscriptionData.getTagsSet().contains(msg.getTags())) {
                             msgListFilterAgain.add(msg);
                         }
@@ -88,6 +89,7 @@ public class PullAPIWrapper {
                 }
             }
 
+            //消息过滤后执行一次hook
             if (this.hasHook()) {
                 FilterMessageContext filterMessageContext = new FilterMessageContext();
                 filterMessageContext.setUnitMode(unitMode);
@@ -95,6 +97,7 @@ public class PullAPIWrapper {
                 this.executeHook(filterMessageContext);
             }
 
+            //TODO 这块不知道是干嘛的
             for (MessageExt msg : msgListFilterAgain) {
                 String traFlag = msg.getProperty(MessageConst.PROPERTY_TRANSACTION_PREPARED);
                 if (Boolean.parseBoolean(traFlag)) {
@@ -143,16 +146,16 @@ public class PullAPIWrapper {
     public PullResult pullKernelImpl(
         final MessageQueue mq,
         final String subExpression,
-        final String expressionType,
+        final String expressionType,//mz 分为TAG、SQL92
         final long subVersion,
-        final long offset,
+        final long offset,//mz 消息拉取偏移量
         final int maxNums,
         final int sysFlag,
-        final long commitOffset,
+        final long commitOffset,//mz 当前MessageQueue的消费进度（内存中）
         final long brokerSuspendMaxTimeMillis,
         final long timeoutMillis,
         final CommunicationMode communicationMode,
-        final PullCallback pullCallback
+        final PullCallback pullCallback //mz 从Broker拉取到消息后的回调方法。
     ) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
         FindBrokerResult findBrokerResult =
             this.mQClientFactory.findBrokerAddressInSubscribe(mq.getBrokerName(),
@@ -194,6 +197,7 @@ public class PullAPIWrapper {
 
             String brokerAddr = findBrokerResult.getBrokerAddr();
             if (PullSysFlag.hasClassFilterFlag(sysFlagInner)) {
+                //因为filterSrv有好多台,这里随机选一台
                 brokerAddr = computPullFromWhichFilterServer(mq.getTopic(), brokerAddr);
             }
 

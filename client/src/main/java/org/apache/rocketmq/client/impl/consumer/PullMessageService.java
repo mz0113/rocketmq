@@ -92,6 +92,11 @@ public class PullMessageService extends ServiceThread {
 
         while (!this.isStopped()) {
             try {
+                //执行每一个pull请求
+                /**
+                 * 一个是在RocketMQ根据PullRequest拉取任务执行完一次消息拉取任务后，又将PullRequest对象放入到pullRequestQueue，
+                 * 第二个是在RebalancceImpl中创建。RebalanceImpl就是下节重点要介绍的消息队列负载机制，也就是PullRequest对象真正创建的地方
+                 */
                 PullRequest pullRequest = this.pullRequestQueue.take();
                 this.pullMessage(pullRequest);
             } catch (InterruptedException ignored) {

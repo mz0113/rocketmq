@@ -877,6 +877,15 @@ public class BrokerController {
             this.clientHousekeepingService.start();
         }
 
+        //mz 启动FilterServer过滤服务 filterServer是个单独的进程！
+        /**
+         * FilterServer与Broker通过心跳维持FilterServer在Broker端的注册，
+         * 同样在Broker每隔10s扫描一下该注册表，如果30s内未收到FilterServer的注册信息，
+         * 将关闭Broker与FilterServer的连接。
+         * Broker为了避免Broker端FilterServer的异常退出导致FilterServer进程越来越少，
+         * 同样提供一个定时任务每30s检测一下当前存活的FilterServer进程的个数，
+         * 如果当前存活的FilterServer进程个数小于配置的数量，则自动创建一个FilterrServer进程
+         */
         if (this.filterServerManager != null) {
             this.filterServerManager.start();
         }

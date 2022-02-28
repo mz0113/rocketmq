@@ -137,6 +137,9 @@ public class BrokerOuterAPI {
 
             RegisterBrokerBody requestBody = new RegisterBrokerBody();
             requestBody.setTopicConfigSerializeWrapper(topicConfigWrapper);
+            //mz filterSrv的信息通过broker向nameSrc注册时候一起带过去了
+            //FilterServer在启动时向Broker注册自己，在Broker端维护该Broker的FilterServer信息，
+            //并定时监控FilterServer的状态，然后Broker通过与所有NameServer的心跳包向NameServer注册Broker上存储的FilterServer列表，指引消息消费者正确从FilterServer上拉取消息
             requestBody.setFilterServerList(filterServerList);
             final byte[] body = requestBody.encode(compressed);
             final int bodyCrc32 = UtilAll.crc32(body);

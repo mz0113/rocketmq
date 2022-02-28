@@ -102,6 +102,13 @@ public interface MessageStore {
      * @param maxMsgNums Maximum count of messages to query.
      * @param messageFilter Message filter used to screen desired messages.
      * @return Matched messages.
+     *
+     * 1）String group：消费组名称。
+     * 2）String topic：主题名称。
+     * 3）int queueId：队列ID。
+     * 4）long offset：待拉取偏移量。
+     * 5）int maxMsgNums：最大拉取消息条数。
+     * 6）MessageFilter messageFilter：消息过滤器。
      */
     GetMessageResult getMessage(final String group, final String topic, final int queueId,
         final long offset, final int maxMsgNums, final MessageFilter messageFilter);
