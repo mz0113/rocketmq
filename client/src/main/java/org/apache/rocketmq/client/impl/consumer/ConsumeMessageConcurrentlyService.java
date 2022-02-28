@@ -376,11 +376,19 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
     }
 
     /**
-     * 重点，并发和顺序都是这个consumeRequest
+     *mz 重点，并发和顺序都是这个consumeRequest
+     *
+     * 关于位移提交的总结:
+     *   并发消费无法手工控制是否提交,在提交位移时候,多个线程都是看同一个msgTreeMap的,而且直接就认为这一批msgs都消费OK了,整体消费位移依然会推进并提交,只是ackIndex之后的消息发重试队列.
+     *   所以可以手工控制ackIndex,消费完成哪条就ack到哪条,避免说又发回重试队列造成重复消费.
+     *
+     *   顺序消费可以手工控制位移是否提交,setAutoCommit即可,但是它没有所谓的ackIndex,如果其中一条消息有问题,会卡在这里.例如返回了SUSPEND_CURRENT_QUEUE_A_MOMENT就不会提交位移,而是本地直接不断的尝试重复消费.
+     *   #ConsumeMessageOrderlyService#checkReconsumeTimes() 只要msgs有一条消息未达最大重试次数就本地循环继续消费这一批,但是任意条消息重试>16次就发回broker应该是直接进入死信了吧毕竟已经重试16次了.当全部消息都重试>16次的话就skip掉这一批然后提交位移了.
+     *
      */
     class ConsumeRequest implements Runnable {
         /**
-         * pullcallback从broker拉回来消息后,在这个msgs中的消息就是已经经过分批处理后的了,也就是传递给客户listener的消息的数量
+         * mz pullcallback从broker拉回来消息后,在这个msgs中的消息就是已经经过分批处理后的了,也就是传递给客户listener的消息的数量
          */
         private final List<MessageExt> msgs;
         private final ProcessQueue processQueue;
@@ -433,7 +441,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                         MessageAccessor.setConsumeStartTimeStamp(msg, String.valueOf(System.currentTimeMillis()));
                     }
                 }
-                //执行用户自己的消费业务逻辑,理论上不可以消费到其中一半时候return一个 CONSUME_SUCCESS ,这会导致消费位移被提交,但是剩余的一半消息其实还未消费
+                //mz 执行用户自己的消费业务逻辑,理论上不可以消费到其中一半时候return一个 CONSUME_SUCCESS ,这会导致消费位移被提交,但是剩余的一半消息其实还未消费
                 //并发消息提交位移时候其实并不看你的ackIndex设置为几了,ackIndex只影响从 ackIndex 到 msg集合结尾这个区间的消息是否发回broker进入重试队列
                 //为什么ackIndex之前的不需要发回呢,因为业务端已经消费了首先必然不需要进入重试队列再次消费.其次位移提交时候只看你未消费的消息的最小位移进行提交.
                 //提交位移时候,会把全部的msgs从msgTreeMap中移除掉,然后看看剩余的msgTreeMap中最小的位移作为要提交的位移
@@ -486,6 +494,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
             ConsumeMessageConcurrentlyService.this.getConsumerStatsManager()
                 .incConsumeRT(ConsumeMessageConcurrentlyService.this.consumerGroup, messageQueue.getTopic(), consumeRT);
 
+            //消费结束后进行的处理,例如发回重试队列和消费位移提交
             if (!processQueue.isDropped()) {
                 ConsumeMessageConcurrentlyService.this.processConsumeResult(status, context, this);
             } else {
