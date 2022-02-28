@@ -17,10 +17,10 @@
 package org.apache.rocketmq.example.quickstart;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import org.apache.rocketmq.client.consumer.DefaultMQPushConsumer;
-import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyContext;
-import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
-import org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently;
+import org.apache.rocketmq.client.consumer.listener.*;
 import org.apache.rocketmq.client.exception.MQClientException;
 import org.apache.rocketmq.common.consumer.ConsumeFromWhere;
 import org.apache.rocketmq.common.message.MessageExt;
@@ -35,8 +35,8 @@ public class Consumer {
         /*
          * Instantiate with specified consumer group name.
          */
-        DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("consumerGrp1");
-        consumer.setNamesrvAddr("127.0.0.1:9876");
+        DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("test2");
+        consumer.setNamesrvAddr("172.17.39.185:9876");
         /*
          * Specify name server addresses.
          * <p/>
@@ -52,23 +52,45 @@ public class Consumer {
         /*
          * Specify where to start in case the specified consumer group is a brand new one.
          */
-        consumer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_FIRST_OFFSET);
+        consumer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_LAST_OFFSET);
 
         /*
          * Subscribe one more more topics to consume.
          */
-        consumer.subscribe("TopicTest", "*");
+        consumer.subscribe("test-topic", "*");
 
         /*
          *  Register callback to execute on arrival of messages fetched from brokers.
          */
-        consumer.registerMessageListener(new MessageListenerConcurrently() {
+/*        consumer.registerMessageListener(new MessageListenerConcurrently() {
 
             @Override
             public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> msgs,
                 ConsumeConcurrentlyContext context) {
                 System.out.printf("%s Receive New Messages: %s %n", Thread.currentThread().getName(), msgs);
                 return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
+            }
+        });*/
+        /**
+         * 位移提交的说明
+         * 如果是集群消费-并发消费的话，msgs的size可能>1,如果maxSpan过大会导致无法继续拉取。另外
+         */
+        AtomicInteger atomicInteger = new AtomicInteger(0);
+        consumer.registerMessageListener(new MessageListenerOrderly() {
+
+            @Override
+            public ConsumeOrderlyStatus consumeMessage(List<MessageExt> msgs, ConsumeOrderlyContext context) {
+                atomicInteger.incrementAndGet();
+                if (3>0||atomicInteger.get()%10==4) {
+                    for (MessageExt msg : msgs) {
+                        System.out.println(System.currentTimeMillis()+" pause: "+new String(msg.getBody()));
+                    }
+                    return ConsumeOrderlyStatus.SUSPEND_CURRENT_QUEUE_A_MOMENT;
+                }
+                for (MessageExt msg : msgs) {
+                    System.out.println(System.currentTimeMillis()+" Receive New Messages: "+new String(msg.getBody()));
+                }
+                return ConsumeOrderlyStatus.SUCCESS;
             }
         });
 
