@@ -62,11 +62,15 @@ public class WaitNotifyObject {
     protected void onWaitEnd() {
     }
 
+    /**
+     * 唤醒所有线程
+     */
     public void wakeupAll() {
         synchronized (this) {
             boolean needNotify = false;
 
             for (Map.Entry<Long,Boolean> entry : this.waitingThreadTable.entrySet()) {
+                //只要这些线程里面有一个是false未通知，则进行this.notifyAll()
                 needNotify = needNotify || !entry.getValue();
                 entry.setValue(true);
             }
@@ -82,12 +86,14 @@ public class WaitNotifyObject {
         synchronized (this) {
             Boolean notified = this.waitingThreadTable.get(currentThreadId);
             if (notified != null && notified) {
+                //如果已经notify了，就置为false然后调用waitEnd钩子方法不要再等了，再前面wakeUpAll的时候会置为true WaitNotifyObject#wakeupAll()
                 this.waitingThreadTable.put(currentThreadId, false);
                 this.onWaitEnd();
                 return;
             }
 
             try {
+                //否则的话就wait一下
                 this.wait(interval);
             } catch (InterruptedException e) {
                 log.error("Interrupted", e);

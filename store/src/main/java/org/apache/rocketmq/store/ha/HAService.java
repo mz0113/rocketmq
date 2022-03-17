@@ -46,15 +46,26 @@ public class HAService {
 
     private final AtomicInteger connectionCount = new AtomicInteger(0);
 
+    /**
+     * HA Master服务端HA连接对象的封装，与Broker从服务器的网络读写实现类
+     */
     private final List<HAConnection> connectionList = new LinkedList<>();
 
+    /**
+     * HA Master端监听客户端连接实现类
+     */
     private final AcceptSocketService acceptSocketService;
 
     private final DefaultMessageStore defaultMessageStore;
 
     private final WaitNotifyObject waitNotifyObject = new WaitNotifyObject();
+    /**
+     * 从服务器reportOffset后，会更新这个push2SlaveMaxOffset，相当于是一个ack表示从服务器限你在偏移量是多少
+     */
     private final AtomicLong push2SlaveMaxOffset = new AtomicLong(0);
-
+    /**
+     * 主从同步通知实现类
+     */
     private final GroupTransferService groupTransferService;
 
     private final HAClient haClient;
@@ -77,6 +88,11 @@ public class HAService {
         this.groupTransferService.putRequest(request);
     }
 
+    /**
+     * 判断是否有slave，并且说slave的落后偏移量不能太大，否则认为这个slave不可用
+     * @param masterPutWhere
+     * @return
+     */
     public boolean isSlaveOK(final long masterPutWhere) {
         boolean result = this.connectionCount.get() > 0;
         result =
@@ -87,9 +103,11 @@ public class HAService {
     }
 
     public void notifyTransferSome(final long offset) {
+        //其实就是一个死循环的cas操作，如果赋值失败(offset > value 说明没赋成功)就一直赋值。
         for (long value = this.push2SlaveMaxOffset.get(); offset > value; ) {
             boolean ok = this.push2SlaveMaxOffset.compareAndSet(value, offset);
             if (ok) {
+                //更新推送slave数据偏移量成功,各消息发送者线程再次判断自己本次发送的消息是否已经成功复制到从服务器
                 this.groupTransferService.notifyTransferSome();
                 break;
             } else {
@@ -216,6 +234,8 @@ public class HAService {
                                         + sc.socket().getRemoteSocketAddress());
 
                                     try {
+                                        //一个socketChannel对应一个HAConnection
+                                        //Master服务器在收到从服务器的连接请求后，会将主从服务器的连接SocketChannel封装成HAConnection对象
                                         HAConnection conn = new HAConnection(HAService.this, sc);
                                         conn.start();
                                         HAService.this.addConnection(conn);
@@ -274,6 +294,14 @@ public class HAService {
             this.requestsRead = tmp;
         }
 
+        /**
+         * roupTransferService主从同步阻塞实现，
+         * 如果是同步主从模式，消息发送者将消息刷写到磁盘后，需要继续等待新数据被传输到从服务器，
+         * 从服务器数据的复制是在另外一个线程HAConnection中去拉取，
+         * 所以消息发送者在这里需要等待数据传输的结果，Group TransferService就是实现该功能
+         *
+         * 大意是指wait在这里，直到HAConnection把数据同步给从节点把。
+         */
         private void doWaitTransfer() {
             synchronized (this.requestsRead) {
                 if (!this.requestsRead.isEmpty()) {
@@ -281,7 +309,11 @@ public class HAService {
                         boolean transferOK = HAService.this.push2SlaveMaxOffset.get() >= req.getNextOffset();
                         long waitUntilWhen = HAService.this.defaultMessageStore.getSystemClock().now()
                             + HAService.this.defaultMessageStore.getMessageStoreConfig().getSyncFlushTimeout();
+
+                        //循环直到transferOK或者同步刷盘超时。注意这里的参数是同步刷盘参数，控制了给slave传输数据的超时时间。
                         while (!transferOK && HAService.this.defaultMessageStore.getSystemClock().now() < waitUntilWhen) {
+                            //完美的衔接上了，notifyTransferObject这个lock会在从服务器向master拉数据也就是上报偏移量后会wake一次 #notifyTransferSome()，
+                            //各消息发送者线程再次判断自己本次发送的消息是否已经成功复制到从服务器
                             this.notifyTransferObject.waitForRunning(1000);
                             transferOK = HAService.this.push2SlaveMaxOffset.get() >= req.getNextOffset();
                         }
@@ -360,11 +392,18 @@ public class HAService {
 
         private boolean reportSlaveMaxOffset(final long maxOffset) {
             this.reportOffset.position(0);
+            //8的意思是一个long正好是8个字节，用来放那个maxOffset
             this.reportOffset.limit(8);
+
+            //slave当前的偏移量
             this.reportOffset.putLong(maxOffset);
+
+            //其实这就是一个flip的操作切换为读以便下面能write出去,他非得这么写我就不动了。
             this.reportOffset.position(0);
             this.reportOffset.limit(8);
 
+            //调用网络通道的write方法是在一个while循环中反复判断byteBuffer是否全部写入到通道中，
+            //这是由于NIO是一个非阻塞IO，调用一次write方法不一定会将ByteBuffer可读字节全部写出
             for (int i = 0; i < 3 && this.reportOffset.hasRemaining(); i++) {
                 try {
                     this.socketChannel.write(this.reportOffset);
@@ -376,6 +415,7 @@ public class HAService {
             }
 
             lastWriteTimestamp = HAService.this.defaultMessageStore.getSystemClock().now();
+            //是否汇报成功取决与byteBuffer里面还有没有字节未写出，那为啥不继续写呢？为啥写死3次
             return !this.reportOffset.hasRemaining();
         }
 
@@ -404,17 +444,22 @@ public class HAService {
 
         private boolean processReadEvent() {
             int readSizeZeroTimes = 0;
+            //循环判断readByteBuffer是否还有剩余空间，如果存在剩余空间，
+            //则调用SocketChannel#read（ByteBufferreadByteBuffer），将通道中的数据读入到读缓存区中
             while (this.byteBufferRead.hasRemaining()) {
                 try {
                     int readSize = this.socketChannel.read(this.byteBufferRead);
                     if (readSize > 0) {
                         readSizeZeroTimes = 0;
+                        //如果读取到的字节数大于0，重置读取到0字节的次数，并更新最后一次写入时间戳（lastWriteTimestamp），
+                        // 然后调用dispatchReadRequest方法将读取到的所有消息全部追加到消息内存映射文件中，然后再次反馈拉取进度给服务器
                         boolean result = this.dispatchReadRequest();
                         if (!result) {
                             log.error("HAClient, dispatchReadRequest error");
                             return false;
                         }
                     } else if (readSize == 0) {
+                        //如果连续3次从网络通道读取到0个字节，则结束本次读，返回true
                         if (++readSizeZeroTimes >= 3) {
                             break;
                         }
@@ -433,6 +478,8 @@ public class HAService {
 
         private boolean dispatchReadRequest() {
             final int msgHeaderSize = 8 + 4; // phyoffset + size
+
+            //可读的最大位置应该是，比如有8个字节可读，这里就是8
             int readSocketPos = this.byteBufferRead.position();
 
             while (true) {
@@ -456,11 +503,15 @@ public class HAService {
                         this.byteBufferRead.position(this.dispatchPosition + msgHeaderSize);
                         this.byteBufferRead.get(bodyData);
 
+                        //追加数据到slave的commitLog中
                         HAService.this.defaultMessageStore.appendToCommitLog(masterPhyOffset, bodyData);
 
+                        //读完了以后重置指针到下一次要读取的位置
                         this.byteBufferRead.position(readSocketPos);
+                        //dispatchPosition，就是加上本次已经读了的header+body的偏移就是下一次要读的便宜
                         this.dispatchPosition += msgHeaderSize + bodySize;
 
+                        //再次向master上报待拉取偏移量，其实就是自己当前的commitLog物理偏移量
                         if (!reportSlaveMaxOffsetPlus()) {
                             return false;
                         }
@@ -470,6 +521,7 @@ public class HAService {
                 }
 
                 if (!this.byteBufferRead.hasRemaining()) {
+                    //如果剩余空间不够了，就重新分配
                     this.reallocateByteBuffer();
                 }
 
@@ -549,6 +601,7 @@ public class HAService {
 
             while (!this.isStopped()) {
                 try {
+                    //连接到master服务器 ha地址是需要单独配的,不过我记得registerBroker时slave会自动读取到brokerID=0的机器的ID作为HA地址的。应该不需要再手动配
                     if (this.connectMaster()) {
 
                         if (this.isTimeToReportOffset()) {
