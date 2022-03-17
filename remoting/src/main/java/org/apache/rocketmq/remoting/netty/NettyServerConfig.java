@@ -18,16 +18,16 @@ package org.apache.rocketmq.remoting.netty;
 
 public class NettyServerConfig implements Cloneable {
     private int listenPort = 8888;
-    private int serverWorkerThreads = 8;
-    private int serverCallbackExecutorThreads = 0;
-    private int serverSelectorThreads = 3;
-    private int serverOnewaySemaphoreValue = 256;
-    private int serverAsyncSemaphoreValue = 64;
-    private int serverChannelMaxIdleTimeSeconds = 120;
+    private int serverWorkerThreads = 8;//worker线程，这个线程池顺便注入到pipeline的了各个handler里面
+    private int serverCallbackExecutorThreads = 0;//默认的public线程池,没有指定线程池的话默认就是这个
+    private int serverSelectorThreads = 3;//netty的主从reactor线程模型下，其从线程的数量，与之相对的主线程写死1了
+    private int serverOnewaySemaphoreValue = 256;//单向消息的最大并发度
+    private int serverAsyncSemaphoreValue = 64;//异步最大并发度
+    private int serverChannelMaxIdleTimeSeconds = 120;//连接的最大空闲时间，超过会断开
 
-    private int serverSocketSndBufSize = NettySystemConfig.socketSndbufSize;
+    private int serverSocketSndBufSize = NettySystemConfig.socketSndbufSize;//socket发送接受缓冲区
     private int serverSocketRcvBufSize = NettySystemConfig.socketRcvbufSize;
-    private boolean serverPooledByteBufAllocatorEnable = true;
+    private boolean serverPooledByteBufAllocatorEnable = true;//是否启用byteBuf的缓存池
 
     /**
      * make make install

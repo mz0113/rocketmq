@@ -664,16 +664,19 @@ public class MQClientInstance {
                     TopicRouteData topicRouteData;
                     if (isDefault && defaultMQProducer != null) {
                         //mz 只有生产者才会进来 defaultMQProducer != null 和自动创建主题有关系
+                        //如果开了自动创建topic参数，则broker会在启动时候给nameSRV注册时候会注册默认topic即TBW102。每台broker都会注册。这里就可以拉取到默认topic信息
                         topicRouteData = this.mQClientAPIImpl.getDefaultTopicRouteInfoFromNameServer(defaultMQProducer.getCreateTopicKey(),
                             1000 * 3);
                         if (topicRouteData != null) {
                             for (QueueData data : topicRouteData.getQueueDatas()) {
+                                //从nameSRV拉取到的和这里默认的常量比取小的那个,所以正常都是defaultMQProducer.getDefaultTopicQueueNums更小=4
                                 int queueNums = Math.min(defaultMQProducer.getDefaultTopicQueueNums(), data.getReadQueueNums());
                                 data.setReadQueueNums(queueNums);
                                 data.setWriteQueueNums(queueNums);
                             }
                         }
                     } else {
+                        //拉取非默认正常的topic
                         topicRouteData = this.mQClientAPIImpl.getTopicRouteInfoFromNameServer(topic, 1000 * 3);
                     }
                     if (topicRouteData != null) {

@@ -51,20 +51,7 @@ import org.apache.rocketmq.client.impl.MQClientManager;
 import org.apache.rocketmq.client.impl.factory.MQClientInstance;
 import org.apache.rocketmq.client.latency.MQFaultStrategy;
 import org.apache.rocketmq.client.log.ClientLogger;
-import org.apache.rocketmq.client.producer.DefaultMQProducer;
-import org.apache.rocketmq.client.producer.LocalTransactionExecuter;
-import org.apache.rocketmq.client.producer.LocalTransactionState;
-import org.apache.rocketmq.client.producer.MessageQueueSelector;
-import org.apache.rocketmq.client.producer.RequestCallback;
-import org.apache.rocketmq.client.producer.RequestFutureTable;
-import org.apache.rocketmq.client.producer.RequestResponseFuture;
-import org.apache.rocketmq.client.producer.SendCallback;
-import org.apache.rocketmq.client.producer.SendResult;
-import org.apache.rocketmq.client.producer.SendStatus;
-import org.apache.rocketmq.client.producer.TransactionCheckListener;
-import org.apache.rocketmq.client.producer.TransactionListener;
-import org.apache.rocketmq.client.producer.TransactionMQProducer;
-import org.apache.rocketmq.client.producer.TransactionSendResult;
+import org.apache.rocketmq.client.producer.*;
 import org.apache.rocketmq.common.MixAll;
 import org.apache.rocketmq.common.ServiceState;
 import org.apache.rocketmq.common.UtilAll;
@@ -708,7 +695,11 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         if (topicPublishInfo.isHaveTopicRouterInfo() || topicPublishInfo.ok()) {
             return topicPublishInfo;
         } else {
-            //mz 如果仍然查不到，则用默认topic TBW102去查询一次
+            /**
+             * 第二次拉取时isDefault设为true，这表示它会拉取TBW102的路由数据，只要你没有人为的删除，那么它必然可以拉取成功。
+             * Producer会基于TBW102的配置构建TopicPublishInfo并缓存到本地，然后进行正常的消息发送。注意：此时Topic在Broker中仍然不存在！
+             * 发送的msg中topic字段仍是真实topic值，然后还有个defaultTopic字段是这里的TBW102。broker检测到有defaultTopic后会自动创建主题。
+             */
             this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic, true, this.defaultMQProducer);
             topicPublishInfo = this.topicPublishInfoTable.get(topic);
             return topicPublishInfo;

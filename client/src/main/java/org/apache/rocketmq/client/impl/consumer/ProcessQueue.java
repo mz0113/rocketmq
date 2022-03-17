@@ -245,6 +245,7 @@ public class ProcessQueue {
                     msgCount.addAndGet(removedCnt);
 
                     if (!msgTreeMap.isEmpty()) {
+                        //注意这里是第一个元素,也就是最小位移
                         result = msgTreeMap.firstKey();
                     }
                 }
@@ -309,6 +310,9 @@ public class ProcessQueue {
             this.lockTreeMap.writeLock().lockInterruptibly();
             try {
                 Long offset = this.consumingMsgOrderlyTreeMap.lastKey();
+                //从consumingMsgOrderlyTreeMap里面拿出最大偏移的作为要提交的偏移
+                //这里拿的是最大偏移！最大的偏移！既然我是顺序消息，而且我准备提交了。也就是说刚才这个consumingMsgOrderlyTreeMap的消息我都已经全部消费过来
+                //如果有任何一条消息还需要重试也不会进入commit。反正就是说要commit一定意味着这一批消息消费完了，所以可以拿最大的offset
                 msgCount.addAndGet(0 - this.consumingMsgOrderlyTreeMap.size());
                 for (MessageExt msg : this.consumingMsgOrderlyTreeMap.values()) {
                     msgSize.addAndGet(0 - msg.getBody().length);

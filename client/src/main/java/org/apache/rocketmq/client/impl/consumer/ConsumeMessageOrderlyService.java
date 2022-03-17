@@ -195,11 +195,15 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
 
     @Override
     public void submitConsumeRequest(
+            /**
+             * pullback从broker拉到的全部消息,其实processQueue里面也放好了.所以msgs这里压根没有用到
+             */
         final List<MessageExt> msgs,
         final ProcessQueue processQueue,
         final MessageQueue messageQueue,
         final boolean dispathToConsume) {
         if (dispathToConsume) {
+            //看起来即便是order service 这里的executor线程池的线程数量也不止1 这个原因暂不清楚,比较这里的msgs显然一定是唯一对应某个messageQueue拉下来的.
             ConsumeRequest consumeRequest = new ConsumeRequest(processQueue, messageQueue);
             this.consumeExecutor.submit(consumeRequest);
         }
@@ -281,12 +285,14 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                     this.getConsumerStatsManager().incConsumeFailedTPS(consumerGroup, consumeRequest.getMessageQueue().getTopic(), msgs.size());
                     if (checkReconsumeTimes(msgs)) {
                         consumeRequest.getProcessQueue().makeMessageToCosumeAgain(msgs);
+                        //继续消费,又回到了刚开始消费的入口，重新从processQueue中取一个batchCount的消息进行处理，这里也就意味着极有可能重复处理
                         this.submitConsumeRequestLater(
                             consumeRequest.getProcessQueue(),
                             consumeRequest.getMessageQueue(),
                             context.getSuspendCurrentQueueTimeMillis());
                         continueConsume = false;
                     } else {
+                        //如果所有消息都到达了重试次数最大限制，则没办法了就只能提交位移了
                         commitOffset = consumeRequest.getProcessQueue().commit();
                     }
                     break;
@@ -302,6 +308,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                     commitOffset = consumeRequest.getProcessQueue().commit();
                     break;
                 case ROLLBACK:
+                    //this.consumingMsgOrderlyTreeMap 再放回到msgTreeMap中然后重新消费
                     consumeRequest.getProcessQueue().rollback();
                     this.submitConsumeRequestLater(
                         consumeRequest.getProcessQueue(),
@@ -325,6 +332,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
             }
         }
 
+        //先把位移提交到本地缓存，等待定时任务上传到broker端上
         if (commitOffset >= 0 && !consumeRequest.getProcessQueue().isDropped()) {
             this.defaultMQPushConsumerImpl.getOffsetStore().updateOffset(consumeRequest.getMessageQueue(), commitOffset, false);
         }
@@ -345,13 +353,20 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
         }
     }
 
+    /**
+     * 这里发现是判断整个消息集合的,也就是只要有1条消息还未到达重试次数最大限制就继续消费这一批消息！
+     * @param msgs
+     * @return true，则继续消费，false，立刻提交位移
+     */
     private boolean checkReconsumeTimes(List<MessageExt> msgs) {
+        //默认提交位移
         boolean suspend = false;
         if (msgs != null && !msgs.isEmpty()) {
             for (MessageExt msg : msgs) {
                 if (msg.getReconsumeTimes() >= getMaxReconsumeTimes()) {
                     MessageAccessor.setReconsumeTime(msg, String.valueOf(msg.getReconsumeTimes()));
                     if (!sendMessageBack(msg)) {
+                        //如果发回broker失败了，则兜底还是继续消费！
                         suspend = true;
                         msg.setReconsumeTimes(msg.getReconsumeTimes() + 1);
                     }
@@ -419,11 +434,17 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                 return;
             }
 
+            //获取该messageQueue对应的lock,将其锁住后不允许两个线程同时消费同一个messageQueue
+            //这个只有顺序消费才会有这个限制,并发消费显然多个线程可以一起消费同一个messageQueue,只不过同一个group不能同时消费同一个message罢了.
             final Object objLock = messageQueueLock.fetchLockObject(this.messageQueue);
             synchronized (objLock) {
                 if (MessageModel.BROADCASTING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())
                     || (this.processQueue.isLocked() && !this.processQueue.isLockExpired())) {
+                    //广播模式的顺序消费 不需要给processQueue加锁的原因是什么?
+                    //集群模式的顺序消费 processQueue.isLocked=true表示服务端的锁还未释放,自己还拿着呢.就算负载均衡发生了
+                    //  ,只要自己不释放这个broker端的锁,其他线程也是不会去进行pull的,pull时会跳过这个messageQueue
                     final long beginTime = System.currentTimeMillis();
+                    //一直循环从processQueue中获取消息
                     for (boolean continueConsume = true; continueConsume; ) {
                         if (this.processQueue.isDropped()) {
                             log.warn("the message queue not be able to consume, because it's dropped. {}", this.messageQueue);
@@ -450,6 +471,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                             break;
                         }
 
+                        //从processQueue中take消息出来进行消费
                         final int consumeBatchSize =
                             ConsumeMessageOrderlyService.this.defaultMQPushConsumer.getConsumeMessageBatchMaxSize();
 

@@ -200,11 +200,16 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
 
     @Override
     public void submitConsumeRequest(
+            /**
+             * msgs是pullBack回调接口从broker端拉回来的消息集合,这里要进行分批消费了，也就是一次传入客户端回调listener的消息数量大小
+             * 顺序消费的service是从processQueue中take消息出来消费的,而并发service是直接拿这个msgs了,没有用processQueue重新take
+             */
         final List<MessageExt> msgs,
         final ProcessQueue processQueue,
         final MessageQueue messageQueue,
         final boolean dispatchToConsume) {
         final int consumeBatchSize = this.defaultMQPushConsumer.getConsumeMessageBatchMaxSize();
+        //msgs是pullBack回调接口从broker端拉回来的消息集合,这里要进行分批消费了，也就是一次传入客户端回调listener的消息数量大小
         if (msgs.size() <= consumeBatchSize) {
             ConsumeRequest consumeRequest = new ConsumeRequest(msgs, processQueue, messageQueue);
             try {
@@ -225,6 +230,8 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                 //分批调用监听器进行消息消费
                 ConsumeRequest consumeRequest = new ConsumeRequest(msgThis, processQueue, messageQueue);
                 try {
+                    //每一批都同时提交到线程池里面执行了,这就是并发消费 this.defaultMQPushConsumer.getConsumeThreadMin() 指定线程池参数大小,max没用,因为这里是无界队列
+                    //多了以后就会限流拉取消息的,用不着这里操心,所以必不可能触发拒绝策略
                     this.consumeExecutor.submit(consumeRequest);
                 } catch (RejectedExecutionException e) {
                     for (; total < msgs.size(); total++) {
@@ -291,10 +298,10 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                 }
                 break;
             case CLUSTERING:
+                //如果消费有问题,则把剩余的消息 [ackIndex,msg.size()] 这个范围内的消息发回给broker的重试队列中,注意卡ACK的问题.
                 List<MessageExt> msgBackFailed = new ArrayList<MessageExt>(consumeRequest.getMsgs().size());
                 for (int i = ackIndex + 1; i < consumeRequest.getMsgs().size(); i++) {
                     MessageExt msg = consumeRequest.getMsgs().get(i);
-                    //把消息发回给broker的重试队列中,注意卡ACK的问题
                     boolean result = this.sendMessageBack(msg, context);
                     if (!result) {
                         //如果发回失败了,就再下面再重试消费一次。。。
@@ -314,7 +321,8 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
         }
 
         //持久化这里只是更新内存的offset
-        //定时任务 MQClientInstance.this.persistAllConsumerOffset();会提交到broker
+        //定时任务 MQClientInstance.this.persistAllConsumerOffset();会提交到broker 这里的offset是第一个元素.也就是说这个msgs如果某条消息报错停止消费了
+        //在这里提交位移时候,会把全部的msgs从msgTreeMap中移除掉,然后看看剩余的msgTreeMap中最小的位移作为要提交的位移
         long offset = consumeRequest.getProcessQueue().removeMessage(consumeRequest.getMsgs());
         if (offset >= 0 && !consumeRequest.getProcessQueue().isDropped()) {
             this.defaultMQPushConsumerImpl.getOffsetStore().updateOffset(consumeRequest.getMessageQueue(), offset, true);
@@ -367,7 +375,21 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
         }, 5000, TimeUnit.MILLISECONDS);
     }
 
+    /**
+     *mz 重点，并发和顺序都是这个consumeRequest
+     *
+     * 关于位移提交的总结:
+     *   并发消费无法手工控制是否提交,在提交位移时候,多个线程都是看同一个msgTreeMap的,而且直接就认为这一批msgs都消费OK了,整体消费位移依然会推进并提交,只是ackIndex之后的消息发重试队列.
+     *   所以可以手工控制ackIndex,消费完成哪条就ack到哪条,避免说又发回重试队列造成重复消费.
+     *
+     *   顺序消费可以手工控制位移是否提交,setAutoCommit即可,但是它没有所谓的ackIndex,如果其中一条消息有问题,会卡在这里.例如返回了SUSPEND_CURRENT_QUEUE_A_MOMENT就不会提交位移,而是本地直接不断的尝试重复消费.
+     *   #ConsumeMessageOrderlyService#checkReconsumeTimes() 只要msgs有一条消息未达最大重试次数就本地循环继续消费这一批,但是任意条消息重试>16次就发回broker应该是直接进入死信了吧毕竟已经重试16次了.当全部消息都重试>16次的话就skip掉这一批然后提交位移了.
+     *
+     */
     class ConsumeRequest implements Runnable {
+        /**
+         * mz pullcallback从broker拉回来消息后,在这个msgs中的消息就是已经经过分批处理后的了,也就是传递给客户listener的消息的数量
+         */
         private final List<MessageExt> msgs;
         private final ProcessQueue processQueue;
         private final MessageQueue messageQueue;
@@ -419,8 +441,16 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
                         MessageAccessor.setConsumeStartTimeStamp(msg, String.valueOf(System.currentTimeMillis()));
                     }
                 }
+                //mz 执行用户自己的消费业务逻辑,理论上不可以消费到其中一半时候return一个 CONSUME_SUCCESS ,这会导致消费位移被提交,但是剩余的一半消息其实还未消费
+                //并发消息提交位移时候其实并不看你的ackIndex设置为几了,ackIndex只影响从 ackIndex 到 msg集合结尾这个区间的消息是否发回broker进入重试队列
+                //为什么ackIndex之前的不需要发回呢,因为业务端已经消费了首先必然不需要进入重试队列再次消费.其次位移提交时候只看你未消费的消息的最小位移进行提交.
+                //提交位移时候,会把全部的msgs从msgTreeMap中移除掉,然后看看剩余的msgTreeMap中最小的位移作为要提交的位移
+                //重点:即便你这里消费过了,但是这个线程消费这一批数据的位移可未必是最小的.比如有两批数据吧
+                //batch1 和 batch2 ,下面各三条消息且2比1的位移都大.现在batch2先消费完了.然而batch1有问题,batch1的消息会发回broker进行重试,但是batch2不会发回,并且两个线程
+                //在提交位移时候,都是看同一个msgTreeMap的...写到这里突然发现,消费位移提交显然一定会做,而且直接就认为这msgs都消费OK了,如果不OK就发重试队列,但是消费位移依然会推进并提交.
                 status = listener.consumeMessage(Collections.unmodifiableList(msgs), context);
             } catch (Throwable e) {
+                //假设其中一条抛错误出来,或者说消费到一半直接return了一个status出来例如return了一个
                 log.warn("consumeMessage exception: {} Group: {} Msgs: {} MQ: {}",
                     RemotingHelper.exceptionSimpleDesc(e),
                     ConsumeMessageConcurrentlyService.this.consumerGroup,
@@ -464,6 +494,7 @@ public class ConsumeMessageConcurrentlyService implements ConsumeMessageService 
             ConsumeMessageConcurrentlyService.this.getConsumerStatsManager()
                 .incConsumeRT(ConsumeMessageConcurrentlyService.this.consumerGroup, messageQueue.getTopic(), consumeRT);
 
+            //消费结束后进行的处理,例如发回重试队列和消费位移提交
             if (!processQueue.isDropped()) {
                 ConsumeMessageConcurrentlyService.this.processConsumeResult(status, context, this);
             } else {

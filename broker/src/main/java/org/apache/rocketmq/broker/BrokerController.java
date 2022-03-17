@@ -906,7 +906,7 @@ public class BrokerController {
                     log.error("registerBrokerAll Exception", e);
                 }
             }
-        }, 1000 * 10, Math.max(10000, Math.min(brokerConfig.getRegisterNameServerPeriod(), 60000)), TimeUnit.MILLISECONDS);
+        }, 1000 * 10, Math.max(10000*1000, Math.min(brokerConfig.getRegisterNameServerPeriod(), 60000)), TimeUnit.MILLISECONDS);
 
         if (this.brokerStatsManager != null) {
             this.brokerStatsManager.start();

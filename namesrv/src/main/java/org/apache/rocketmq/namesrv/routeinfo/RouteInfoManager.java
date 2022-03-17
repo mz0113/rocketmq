@@ -53,7 +53,7 @@ public class RouteInfoManager {
     private final HashMap<String/* brokerName */, BrokerData> brokerAddrTable;
     private final HashMap<String/* clusterName */, Set<String/* brokerName */>> clusterAddrTable;
     private final HashMap<String/* brokerAddr */, BrokerLiveInfo> brokerLiveTable;
-    private final HashMap<String/* brokerAddr */, List<String>/* Filter Server */> filterServerTable;
+    private final HashMap<String/* brokerAddr */, List<String>/* Filter Server */> filterServerTable;//服务端的消息过滤,客户端应该也有一个(猜测)
 
     public RouteInfoManager() {
         this.topicQueueTable = new HashMap<String, List<QueueData>>(1024);
@@ -133,21 +133,21 @@ public class RouteInfoManager {
                 //The same IP:PORT must only have one record in brokerAddrTable
                 Iterator<Entry<Long, String>> it = brokerAddrsMap.entrySet().iterator();
                 while (it.hasNext()) {
-                    Entry<Long, String> item = it.next();
+                    Entry<Long, String> item = it.next();//判断说当前nameSrv存储的broker信息和本次注册请求的信息是否一致，可能ip相同但是brokerid却不同，测试就移除掉原本存的
                     if (null != brokerAddr && brokerAddr.equals(item.getValue()) && brokerId != item.getKey()) {
                         it.remove();
                     }
                 }
-
+                //由此可知,只要brokerID不一样，即便broker的Addr一样也被认为是全新的，registerFirst也被设置为true
                 String oldAddr = brokerData.getBrokerAddrs().put(brokerId, brokerAddr);
                 registerFirst = registerFirst || (null == oldAddr);
 
+                //更新topic的路由信息
                 if (null != topicConfigWrapper
-                    && MixAll.MASTER_ID == brokerId) {
+                    && MixAll.MASTER_ID == brokerId) {//其实就是看上次注册后LiveTable里面的dataVersion是否与当前注册的一样
                     if (this.isBrokerTopicConfigChanged(brokerAddr, topicConfigWrapper.getDataVersion())
                         || registerFirst) {
-                        ConcurrentMap<String, TopicConfig> tcTable =
-                            topicConfigWrapper.getTopicConfigTable();
+                        ConcurrentMap<String, TopicConfig> tcTable = topicConfigWrapper.getTopicConfigTable();
                         if (tcTable != null) {
                             for (Map.Entry<String, TopicConfig> entry : tcTable.entrySet()) {
                                 this.createAndUpdateQueueData(brokerName, entry.getValue());
@@ -163,6 +163,7 @@ public class RouteInfoManager {
                         channel,
                         haServerAddr));
                 if (null == prevBrokerLiveInfo) {
+                    //TODO 这个haServerAddr到底如何传递的
                     log.info("new broker registered, {} HAServer: {}", brokerAddr, haServerAddr);
                 }
 
@@ -175,10 +176,13 @@ public class RouteInfoManager {
                 }
 
                 if (MixAll.MASTER_ID != brokerId) {
+                    //slave设置master地址和ha地址。brokerName对于master和slave都是相同的
                     String masterAddr = brokerData.getBrokerAddrs().get(MixAll.MASTER_ID);
                     if (masterAddr != null) {
                         BrokerLiveInfo brokerLiveInfo = this.brokerLiveTable.get(masterAddr);
                         if (brokerLiveInfo != null) {
+                            //这里可以看到HaServerAddr的传递
+                            //TODO masterAddr和HaServerAddr的区别是啥
                             result.setHaServerAddr(brokerLiveInfo.getHaServerAddr());
                             result.setMasterAddr(masterAddr);
                         }
@@ -235,6 +239,7 @@ public class RouteInfoManager {
             while (it.hasNext()) {
                 QueueData qd = it.next();
                 if (qd.getBrokerName().equals(brokerName)) {
+                    //判断broker上的topic的queue信息是否发生了变更
                     if (qd.equals(queueData)) {
                         addNewOne = false;
                     } else {
@@ -753,7 +758,7 @@ public class RouteInfoManager {
 }
 
 class BrokerLiveInfo {
-    private long lastUpdateTimestamp;
+    private long lastUpdateTimestamp;//上次broker注册nameSrv的时间戳,所以这里nameSrv定时任务会扫描这个时间戳,120秒作为超时时间
     private DataVersion dataVersion;
     private Channel channel;
     private String haServerAddr;
