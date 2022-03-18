@@ -287,6 +287,7 @@ public class DefaultMessageStore implements MessageStore {
         }
 
         this.flushConsumeQueueService.start();
+        //mz 如果开启了dledger则是dledgerServer.start()
         this.commitLog.start();
         this.storeStatsService.start();
 
@@ -416,6 +417,11 @@ public class DefaultMessageStore implements MessageStore {
         return PutMessageStatus.PUT_OK;
     }
 
+    /**
+     * mz 非批量消息
+     * @param msg MessageInstance to store
+     * @return
+     */
     @Override
     public CompletableFuture<PutMessageResult> asyncPutMessage(MessageExtBrokerInner msg) {
         PutMessageStatus checkStoreStatus = this.checkStoreStatus();
@@ -446,6 +452,11 @@ public class DefaultMessageStore implements MessageStore {
         return putResultFuture;
     }
 
+    /**
+     * mz 批量消息
+     * @param messageExtBatch the message batch
+     * @return
+     */
     public CompletableFuture<PutMessageResult> asyncPutMessages(MessageExtBatch messageExtBatch) {
         PutMessageStatus checkStoreStatus = this.checkStoreStatus();
         if (checkStoreStatus != PutMessageStatus.PUT_OK) {
@@ -458,6 +469,7 @@ public class DefaultMessageStore implements MessageStore {
         }
 
         long beginTime = this.getSystemClock().now();
+        //mz dledger
         CompletableFuture<PutMessageResult> resultFuture = this.commitLog.asyncPutMessages(messageExtBatch);
 
         resultFuture.thenAccept((result) -> {

@@ -244,6 +244,7 @@ public class BrokerController {
                     new DefaultMessageStore(this.messageStoreConfig, this.brokerStatsManager, this.messageArrivingListener,
                         this.brokerConfig);
                 if (messageStoreConfig.isEnableDLegerCommitLog()) {
+                    //mz 添加dledger主从切换控制
                     DLedgerRoleChangeHandler roleChangeHandler = new DLedgerRoleChangeHandler(this, (DefaultMessageStore) messageStore);
                     ((DLedgerCommitLog)((DefaultMessageStore) messageStore).getCommitLog()).getdLedgerServer().getdLedgerLeaderElector().addRoleChangeHandler(roleChangeHandler);
                 }
@@ -891,7 +892,9 @@ public class BrokerController {
         }
 
         if (!messageStoreConfig.isEnableDLegerCommitLog()) {
+            //mz 事务消息回查监听
             startProcessorByHa(messageStoreConfig.getBrokerRole());
+            //同步一些topic信息等元数据以及消费组位移等
             handleSlaveSynchronize(messageStoreConfig.getBrokerRole());
             this.registerBrokerAll(true, false, true);
         }
@@ -1173,7 +1176,7 @@ public class BrokerController {
         brokerConfig.setBrokerId(brokerId == 0 ? 1 : brokerId); //TO DO check
         messageStoreConfig.setBrokerRole(BrokerRole.SLAVE);
 
-        //handle the scheduled service
+        //handle the scheduled service 延时消息
         try {
             this.messageStore.handleScheduleMessageService(BrokerRole.SLAVE);
         } catch (Throwable t) {

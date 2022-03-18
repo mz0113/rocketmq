@@ -407,16 +407,23 @@ public class DLedgerCommitLog extends CommitLog {
         long queueOffset;
         try {
             beginTimeInDledgerLock = this.defaultMessageStore.getSystemClock().now();
+            //把msg进行序列化
             encodeResult = this.messageSerializer.serialize(msg);
+
             queueOffset = topicQueueTable.get(encodeResult.queueOffsetKey);
             if (encodeResult.status != AppendMessageStatus.PUT_OK) {
                 return new PutMessageResult(PutMessageStatus.MESSAGE_ILLEGAL, new AppendMessageResult(encodeResult.status));
             }
+
+            //构建AppendEntryRequest请求
             AppendEntryRequest request = new AppendEntryRequest();
             request.setGroup(dLedgerConfig.getGroup());
             request.setRemoteId(dLedgerServer.getMemberState().getSelfId());
             request.setBody(encodeResult.data);
+            //调用DledgerServer的handleAppend方法将数据写入master节点,然后内部会触发分发线程将数据同步复制给slave节点 底层就是三方源码了应该没必要研究的其实。
+            //DefaultMmapFile#appendMessage 该方法我主要是想突出一下写入的方式是 mappedByteBuffer，是通过 FileChannel 的 map 方法创建，即我们常说的 PageCache，即消息追加首先是写入到 pageCache 中
             dledgerFuture = (AppendFuture<AppendEntryResponse>) dLedgerServer.handleAppend(request);
+
             if (dledgerFuture.getPos() == -1) {
                 return new PutMessageResult(PutMessageStatus.OS_PAGECACHE_BUSY, new AppendMessageResult(AppendMessageStatus.UNKNOWN_ERROR));
             }

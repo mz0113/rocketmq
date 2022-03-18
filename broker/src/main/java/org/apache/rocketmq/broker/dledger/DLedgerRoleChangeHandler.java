@@ -71,6 +71,8 @@ public class DLedgerRoleChangeHandler implements DLedgerLeaderElector.RoleChange
                                 if (dLegerServer.getdLedgerStore().getLedgerEndIndex() == -1) {
                                     break;
                                 }
+                                //判断commitIdx(主节点向从节点分发数据,达到半数以后更新commitIdx)。这里就是说保证主节点的数据都已经复制到从节点了
+                                //并且commitLog的的consumerQueue线程已经分发完毕了。
                                 if (dLegerServer.getdLedgerStore().getLedgerEndIndex() == dLegerServer.getdLedgerStore().getCommittedIndex()
                                     && messageStore.dispatchBehindBytes() == 0) {
                                     break;

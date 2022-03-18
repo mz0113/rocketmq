@@ -18,6 +18,9 @@ package org.apache.rocketmq.store;
 
 public class PutMessageResult {
     private PutMessageStatus putMessageStatus;
+    /**
+     * 存放元数据例如本条消息的物理偏移量之类的
+     */
     private AppendMessageResult appendMessageResult;
 
     public PutMessageResult(PutMessageStatus putMessageStatus, AppendMessageResult appendMessageResult) {
