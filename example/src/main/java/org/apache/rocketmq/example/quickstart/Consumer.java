@@ -35,8 +35,8 @@ public class Consumer {
         /*
          * Instantiate with specified consumer group name.
          */
-        DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("test2");
-        consumer.setNamesrvAddr("172.17.39.185:9876");
+        DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("test-topic");
+        consumer.setNamesrvAddr("127.0.0.1:9876");
         /*
          * Specify name server addresses.
          * <p/>
@@ -75,18 +75,10 @@ public class Consumer {
          * 位移提交的说明
          * 如果是集群消费-并发消费的话，msgs的size可能>1,如果maxSpan过大会导致无法继续拉取。另外
          */
-        AtomicInteger atomicInteger = new AtomicInteger(0);
         consumer.registerMessageListener(new MessageListenerOrderly() {
 
             @Override
             public ConsumeOrderlyStatus consumeMessage(List<MessageExt> msgs, ConsumeOrderlyContext context) {
-                atomicInteger.incrementAndGet();
-                if (3>0||atomicInteger.get()%10==4) {
-                    for (MessageExt msg : msgs) {
-                        System.out.println(System.currentTimeMillis()+" pause: "+new String(msg.getBody()));
-                    }
-                    return ConsumeOrderlyStatus.SUSPEND_CURRENT_QUEUE_A_MOMENT;
-                }
                 for (MessageExt msg : msgs) {
                     System.out.println(System.currentTimeMillis()+" Receive New Messages: "+new String(msg.getBody()));
                 }

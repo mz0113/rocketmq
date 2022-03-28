@@ -5,16 +5,15 @@ import org.apache.kafka.clients.producer.*;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.utils.Utils;
-import org.apache.rocketmq.client.exception.MQBrokerException;
-import org.apache.rocketmq.client.exception.MQClientException;
-import org.apache.rocketmq.client.producer.DefaultMQProducer;
 import org.apache.rocketmq.client.producer.MessageQueueSelector;
+import org.apache.rocketmq.client.producer.SendCallback;
 import org.apache.rocketmq.client.producer.SendResult;
 import org.apache.rocketmq.client.producer.TransactionMQProducer;
 import org.apache.rocketmq.common.message.Message;
 import org.apache.rocketmq.common.message.MessageQueue;
-import org.apache.rocketmq.remoting.exception.RemotingException;
+import org.springframework.kafka.core.KafkaTemplate;
 
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,6 +23,7 @@ import java.util.concurrent.Future;
 public class TestKafka {
     KafkaProducer kafkaProducer;
     TransactionMQProducer defaultMQProducer;
+    KafkaTemplate kafkaTemplate;
 
     public static void main(String[] args) throws ExecutionException, InterruptedException {
         new TestKafka().test();
@@ -47,29 +47,42 @@ public class TestKafka {
 
             //发送rocketMQ，其实好像我也不用纠结kafka是否发送成功吧。
             String topic = producerRecord.topic();
-            Object value = producerRecord.value();
-            Object key = producerRecord.key();
+            String value = (String) producerRecord.value();
+            String key = (String) producerRecord.key();
             Integer partition = producerRecord.partition();
             Headers headers = producerRecord.headers();
-
 
             Message message = new Message();
             message.setBody(JSON.toJSONBytes(value));
             message.setTopic(topic);
+
             //key会导致hash冲突链表特别长，因此不能把key拿过来直接用，他这个key主要是做分区的选择
+            MessageQueueSelector queueSelector;
             if (key != null || partition != null) {
                 //我们替他手动选择一个queue发送即可
+                queueSelector = new MessageQueueSelector() {
+                    @Override
+                    public MessageQueue select(List<MessageQueue> mqs, Message msg, Object arg) {
+                        int i = Utils.toPositive(Utils.murmur2(((String) arg).getBytes(StandardCharsets.UTF_8))) % mqs.size();
+                        return mqs.get(i);
+                    }
+                };
             }
 
-
+            StringBuilder stringBuilder = new StringBuilder();
             for (Header header : headers) {
                 String hK = header.key();
                 byte[] hV = header.value();
-                //TODO 这里hv字节流,能转成string吗 前端应该得拦截器去掉这个前缀吧
-                message.putUserProperty("R1K2T3M_"+hK,new String(hV));
+
+                if (hV != null && hV.length > 0) {
+                    for (byte b : hV) {
+                        stringBuilder.append(b).append(",");
+                    }
+                    stringBuilder.deleteCharAt(stringBuilder.length()-1);
+                }
+
+                message.putUserProperty("R1K2_"+hK,stringBuilder.toString());
             }
-
-
             return producerRecord;
         }
 
