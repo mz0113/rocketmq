@@ -75,6 +75,8 @@ public class MQFaultStrategy {
                         pos = 0;
                     MessageQueue mq = tpInfo.getMessageQueueList().get(pos);
                     if (latencyFaultTolerance.isAvailable(mq.getBrokerName())) {
+                        //这里4.9.2已经改了 直接return 应该是个BUG
+                        //https://github.com/apache/rocketmq/issues/4139
                         if (null == lastBrokerName || mq.getBrokerName().equals(lastBrokerName))
                             return mq;
                     }
