@@ -24,7 +24,11 @@ import org.apache.rocketmq.common.message.Message;
 import org.apache.rocketmq.common.message.MessageQueue;
 import org.apache.rocketmq.remoting.common.RemotingHelper;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * This class demonstrates how to send messages to brokers using provided {@link DefaultMQProducer}.
@@ -54,37 +58,69 @@ public class Producer {
          */
         producer.start();
 
-        for (int i = 0; i < 5; i++) {
+        AtomicLong atomicInteger = new AtomicLong(0);
+        AtomicBoolean atomicBoolean = new AtomicBoolean(true);
+        List<Thread> threads = new ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            Thread thread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    while (atomicInteger.get() < 80 * 10 * 1000) {
+                        try {
+                            /*
+                             * Create a message instance, specifying topic, tag and message body.
+                             */
+                            Message msg = new Message("kafkaconnect" /* Topic */,
+                                    "TagA" /* Tag */,
+                                    ("Hello RocketMQ " + atomicInteger.incrementAndGet()).getBytes(RemotingHelper.DEFAULT_CHARSET) /* Message body */
+                            );
+                            /*
+                             * Call send message to deliver message to one of brokers.
+                             */
+                            SendResult sendResult = producer.send(msg, 8000);
+
+                            //System.out.println(String.format("%s  %s",sendResult.getQueueOffset(),new String(msg.getBody())));
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        } finally {
+                            //producer.shutdown();
+                        }
+                    }
+                }
+            });
+            threads.add(thread);
+            thread.start();
+        }
+        for (Thread thread : threads) {
+            thread.join();
+        }
+        System.out.println("total count:"+atomicInteger.get());
+
+/*        for (int i = 0; i < 10; i++) {
             try {
 
-                /*
+                *//*
                  * Create a message instance, specifying topic, tag and message body.
-                 */
-                Message msg = new Message("test-topic" /* Topic */,
-                    "TagA" /* Tag */,
-                    ("Hello RocketMQ " + i).getBytes(RemotingHelper.DEFAULT_CHARSET) /* Message body */
+                 *//*
+                Message msg = new Message("kafkaconnect" *//* Topic *//*,
+                    "TagA" *//* Tag *//*,
+                    ("Hello RocketMQ " + i).getBytes(RemotingHelper.DEFAULT_CHARSET) *//* Message body *//*
                 );
 
-                /*
+                *//*
                  * Call send message to deliver message to one of brokers.
-                 */
-                SendResult sendResult = producer.send(msg, new MessageQueueSelector() {
-                    @Override
-                    public MessageQueue select(List<MessageQueue> mqs, Message msg, Object arg) {
-                        return mqs.get(0);
-                    }
-                },0);
+                 *//*
+                SendResult sendResult = producer.send(msg,100);
 
                 System.out.printf("%s%n", sendResult);
             } catch (Exception e) {
                 e.printStackTrace();
                 Thread.sleep(1000);
             }
-        }
+        }*/
 
         /*
          * Shut down once the producer instance is not longer in use.
          */
-        producer.shutdown();
     }
 }

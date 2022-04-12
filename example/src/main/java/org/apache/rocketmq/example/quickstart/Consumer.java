@@ -35,7 +35,7 @@ public class Consumer {
         /*
          * Instantiate with specified consumer group name.
          */
-        DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("test-topic");
+        DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("kafkaconnect");
         consumer.setNamesrvAddr("127.0.0.1:9876");
         /*
          * Specify name server addresses.
@@ -57,7 +57,7 @@ public class Consumer {
         /*
          * Subscribe one more more topics to consume.
          */
-        consumer.subscribe("test-topic", "*");
+        consumer.subscribe("kafkaconnect", "*");
 
         /*
          *  Register callback to execute on arrival of messages fetched from brokers.
@@ -80,7 +80,7 @@ public class Consumer {
             @Override
             public ConsumeOrderlyStatus consumeMessage(List<MessageExt> msgs, ConsumeOrderlyContext context) {
                 for (MessageExt msg : msgs) {
-                    System.out.println(System.currentTimeMillis()+" Receive New Messages: "+new String(msg.getBody()));
+                    System.out.println(System.currentTimeMillis()+" Receive New Messages: "+new String(msg.getBody())+"    keys:"+msg.getKeys() + "    header:"+msg.getUserProperty("head-1") + "    header:"+msg.getUserProperty("head-2"));
                 }
                 return ConsumeOrderlyStatus.SUCCESS;
             }

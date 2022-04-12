@@ -175,6 +175,7 @@ public class ServiceProvider {
                     }
                     return (T)serviceClazz.newInstance();
                 } catch (ClassNotFoundException ex) {
+                    ex.printStackTrace();
                     if (classLoader == thisClassLoader) {
                         // Nothing more to try, onwards.
                         LOG.warn("Unable to locate any class {} via classloader", serviceName,
@@ -194,6 +195,7 @@ public class ServiceProvider {
                 }
             }
         } catch (Exception e) {
+            e.printStackTrace();
             LOG.error("Unable to init service.", e);
         }
         return (T)serviceClazz;

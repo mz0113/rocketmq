@@ -16,6 +16,7 @@
  */
 package org.apache.rocketmq.example.simple;
 
+import java.io.UnsupportedEncodingException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +31,7 @@ import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyContext;
 import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
 import org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently;
 import org.apache.rocketmq.client.consumer.rebalance.AllocateMessageQueueAveragely;
+import org.apache.rocketmq.client.exception.MQBrokerException;
 import org.apache.rocketmq.client.exception.MQClientException;
 import org.apache.rocketmq.client.producer.DefaultMQProducer;
 import org.apache.rocketmq.client.producer.SendResult;
@@ -39,6 +41,7 @@ import org.apache.rocketmq.common.message.MessageExt;
 import org.apache.rocketmq.common.message.MessageQueue;
 import org.apache.rocketmq.remoting.RPCHook;
 import org.apache.rocketmq.remoting.common.RemotingHelper;
+import org.apache.rocketmq.remoting.exception.RemotingException;
 
 
 public class AclClient {
@@ -49,51 +52,38 @@ public class AclClient {
 
     private static final String ACL_SECRET_KEY = "1234567";
 
-    public static void main(String[] args) throws MQClientException, InterruptedException {
+    public static void main(String[] args) throws MQClientException, InterruptedException, MQBrokerException, RemotingException, UnsupportedEncodingException {
         producer();
         pushConsumer();
-        pullConsumer();
+        //pullConsumer();
     }
 
-    public static void producer() throws MQClientException {
+    public static void producer() throws MQClientException, UnsupportedEncodingException, MQBrokerException, RemotingException, InterruptedException {
         DefaultMQProducer producer = new DefaultMQProducer("ProducerGroupName", getAclRPCHook());
         producer.setNamesrvAddr("127.0.0.1:9876");
         producer.start();
 
-        for (int i = 0; i < 128; i++)
-            try {
-                {
-                    Message msg = new Message("TopicTest",
-                        "TagA",
-                        "OrderID188",
-                        "Hello world".getBytes(RemotingHelper.DEFAULT_CHARSET));
-                    SendResult sendResult = producer.send(msg);
-                    System.out.printf("%s%n", sendResult);
-                }
-
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
+        Message msg = new Message("acltest",
+                "",
+                "OrderID188",
+                "Hello world".getBytes(RemotingHelper.DEFAULT_CHARSET));
+        SendResult sendResult = producer.send(msg);
+        System.out.printf("%s%n", sendResult);
 
         producer.shutdown();
     }
 
     public static void pushConsumer() throws MQClientException {
 
-        DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("please_rename_unique_group_name_5", getAclRPCHook(), new AllocateMessageQueueAveragely());
+        DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("acltestgrp", getAclRPCHook(), new AllocateMessageQueueAveragely());
         consumer.setNamesrvAddr("127.0.0.1:9876");
-        consumer.subscribe("TopicTest", "*");
-        consumer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_FIRST_OFFSET);
-        // Wrong time format 2017_0422_221800
-        consumer.setConsumeTimestamp("20180422221800");
-        consumer.registerMessageListener(new MessageListenerConcurrently() {
+        consumer.subscribe("acltest", "*");
+        consumer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_LAST_OFFSET);
 
-            @Override
-            public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> msgs, ConsumeConcurrentlyContext context) {
-                System.out.printf("%s Receive New Messages: %s %n", Thread.currentThread().getName(), msgs);
-                printBody(msgs);
-                return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
-            }
+        consumer.registerMessageListener((MessageListenerConcurrently) (msgs, context) -> {
+            System.out.printf("%s Receive New Messages: %s %n", Thread.currentThread().getName(), msgs);
+            printBody(msgs);
+            return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
         });
         consumer.start();
         System.out.printf("Consumer Started.%n");
