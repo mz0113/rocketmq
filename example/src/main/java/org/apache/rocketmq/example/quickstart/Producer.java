@@ -61,18 +61,18 @@ public class Producer {
         AtomicLong atomicInteger = new AtomicLong(0);
         AtomicBoolean atomicBoolean = new AtomicBoolean(true);
         List<Thread> threads = new ArrayList<>();
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 4; i++) {
             Thread thread = new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    while (atomicInteger.get() < 80 * 10 * 1000) {
+                    while (atomicInteger.get() < 100 * 10 * 1000) {
                         try {
                             /*
                              * Create a message instance, specifying topic, tag and message body.
                              */
                             Message msg = new Message("kafkaconnect" /* Topic */,
                                     "TagA" /* Tag */,
-                                    ("Hello RocketMQ " + atomicInteger.incrementAndGet()).getBytes(RemotingHelper.DEFAULT_CHARSET) /* Message body */
+                                    (String.format("This is Body-%s",atomicInteger.incrementAndGet())).getBytes(RemotingHelper.DEFAULT_CHARSET) /* Message body */
                             );
                             /*
                              * Call send message to deliver message to one of brokers.
