@@ -3,6 +3,7 @@ package org.mz.springboottest.contro;
 import com.bestpay.devops.mq.MQSendAPI;
 import com.bestpay.devops.mq.MQSendCallBack;
 import com.bestpay.devops.mq.MQSendResult;
+import com.bestpay.devops.mq.MQType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Component;
@@ -18,8 +19,8 @@ public class ControllerTest {
 
     @RequestMapping("/send")
     public String send(){
-        final MQSendResult result = mqSendAPI.send("middleware", MessageBuilder.withPayload("hello").setHeader(MQSendAPI.RocketMQHeaders.DELAY,2).build());
-        mqSendAPI.send("middleware", MessageBuilder.withPayload("hello").setHeader(MQSendAPI.RocketMQHeaders.DELAY, 2).build(),
+        final MQSendResult result = mqSendAPI.send("middleware", MessageBuilder.withPayload("hello").setHeader(MQSendAPI.RocketMQHeaders.DELAY,2).build(), MQType.ROCKET);
+/*        mqSendAPI.send("middleware", MessageBuilder.withPayload("hello").setHeader(MQSendAPI.RocketMQHeaders.DELAY, 2).build(),
                 new MQSendCallBack() {
                     @Override
                     public void onSuccess(MQSendResult sendResult) {
@@ -29,12 +30,12 @@ public class ControllerTest {
                     public void onException(Throwable throwable) {
                         System.out.println("do failed");
                     }
-                });
+                },MQType.ROCKET);
 
-        mqSendAPI.send("middleware",mqSendAPI.wrap("hello","orderId","tagA",2));
+        mqSendAPI.send("middleware",mqSendAPI.wrap("hello","orderId",2),MQType.ROCKET);
 
-        mqSendAPI.sendOneway("middleware", MessageBuilder.withPayload("hello").setHeader(MQSendAPI.RocketMQHeaders.DELAY,2).build());
-        mqSendAPI.send("middleware", MessageBuilder.withPayload("hello").setHeader(MQSendAPI.RocketMQHeaders.DELAY,2).build(),200);
+        mqSendAPI.sendOneway("middleware", MessageBuilder.withPayload("hello").setHeader(MQSendAPI.RocketMQHeaders.DELAY,2).build(),MQType.ROCKET);
+        mqSendAPI.send("middleware", MessageBuilder.withPayload("hello").setHeader(MQSendAPI.RocketMQHeaders.DELAY,2).build(),200,MQType.ROCKET);
         mqSendAPI.send("middleware", MessageBuilder.withPayload("hello").setHeader(MQSendAPI.RocketMQHeaders.DELAY, 2).build(),
                 new MQSendCallBack() {
                     @Override
@@ -46,7 +47,7 @@ public class ControllerTest {
                     public void onException(Throwable throwable) {
                         System.out.println("do failed");
                     }
-                },200);
+                },200,MQType.ROCKET);*/
         try {
             result.getObj();
         } catch (Exception e) {
