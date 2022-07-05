@@ -50,23 +50,23 @@ public class Producer {
          */
         producer.start();
 
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < 90000; i++) {
             try {
 
                 /*
                  * Create a message instance, specifying topic, tag and message body.
                  */
-                Message msg = new Message("topicCluster1" /* Topic */,
+                Message msg = new Message("topicC1" /* Topic */,
                     "TagA" /* Tag */,
-                    ("Hello RocketMQ " + i).getBytes(RemotingHelper.DEFAULT_CHARSET) /* Message body */
+                    ("Hello World " + i).getBytes(RemotingHelper.DEFAULT_CHARSET) /* Message body */
                 );
 
                 SendResult sendResult = producer.send(msg);
 
                 System.out.printf("%s%n", sendResult);
+                Thread.sleep(300);
             } catch (Exception e) {
                 e.printStackTrace();
-                Thread.sleep(1000);
             }
         }
 
