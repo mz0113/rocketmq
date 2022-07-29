@@ -33,7 +33,7 @@ public class Consumer1 {
                 return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
             }
         });
-        consumer.setPersistConsumerOffsetInterval(1000 * 60 * 10);
+       // consumer.setPersistConsumerOffsetInterval(60*1000);
         consumer.setPullInterval(2000);
 
 /*        consumer.setConsumerGroup("consumerG1Order");
@@ -58,17 +58,24 @@ public class Consumer1 {
             System.out.println(JSON.toJSONString(consumeStats, SerializerFeature.PrettyFormat));
             final HashMap<MessageQueue, OffsetWrapper> offsetTable = consumeStats.getOffsetTable();
             for (Map.Entry<MessageQueue, OffsetWrapper> entry : offsetTable.entrySet()) {
-                final MessageQueue key = entry.getKey();
-                if (key.getTopic().equals("offsetTest")) {
+                final MessageQueue messageQueue = entry.getKey();
+                if (messageQueue.getTopic().equals("offsetTest")) {
                     final OffsetWrapper wrapper = entry.getValue();
                     final long consumerOffset = wrapper.getConsumerOffset();
-                    consumer.getDefaultMQPushConsumerImpl().updateConsumeOffset(key,consumerOffset);
 
-                    consumer.getDefaultMQPushConsumerImpl().persistConsumerOffset();
+                    Map map = new HashMap();
+                    map.put(messageQueue, consumerOffset);
+                    mqClientInstance.resetOffset(messageQueue.getTopic(), consumer.getConsumerGroup(), map);
+
+                   // consumer.getDefaultMQPushConsumerImpl().updateConsumeOffset(messageQueue,consumerOffset);
+
+                   // consumer.getDefaultMQPushConsumerImpl().persistConsumerOffset();
                 }
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
+
+        System.out.println("finish");
     }
 }
