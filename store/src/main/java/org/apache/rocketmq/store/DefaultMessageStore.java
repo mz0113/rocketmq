@@ -608,6 +608,7 @@ public class DefaultMessageStore implements MessageStore {
                     nextBeginOffset = nextOffsetCorrection(offset, maxOffset);
                 }
             } else {
+                //根据指定的消息条下标,从consumeQueue中获取开始位的buffer
                 SelectMappedBufferResult bufferConsumeQueue = consumeQueue.getIndexBuffer(offset);
                 if (bufferConsumeQueue != null) {
                     try {
@@ -623,9 +624,13 @@ public class DefaultMessageStore implements MessageStore {
                         getResult = new GetMessageResult(maxMsgNums);
 
                         ConsumeQueueExt.CqExtUnit cqExtUnit = new ConsumeQueueExt.CqExtUnit();
+                        //ConsumeQueue.CQ_STORE_UNIT_SIZE是consumeQueue的最小存储单元,一共20字节,每一次for循环就代表一条新消息的consumeQueue的索引条目了
                         for (; i < bufferConsumeQueue.getSize() && i < maxFilterMessageCount; i += ConsumeQueue.CQ_STORE_UNIT_SIZE) {
+                            //8字节commitLog物理偏移量
                             long offsetPy = bufferConsumeQueue.getByteBuffer().getLong();
+                            //4字节消息长度大小
                             int sizePy = bufferConsumeQueue.getByteBuffer().getInt();
+                            //8字节tag的hashcode
                             long tagsCode = bufferConsumeQueue.getByteBuffer().getLong();
 
                             maxPhyOffsetPulling = offsetPy;
@@ -635,6 +640,7 @@ public class DefaultMessageStore implements MessageStore {
                                     continue;
                             }
 
+                            //检查是否能从内存中读取，还是要去磁盘上读了
                             boolean isInDisk = checkInDiskByCommitOffset(offsetPy, maxOffsetPy);
 
                             if (this.isTheBatchFull(sizePy, maxMsgNums, getResult.getBufferTotalSize(), getResult.getMessageCount(),
@@ -695,6 +701,7 @@ public class DefaultMessageStore implements MessageStore {
                             brokerStatsManager.recordDiskFallBehindSize(group, topic, queueId, fallBehind);
                         }
 
+                        //比如for循环了2次,也就是i=40字节,那么也就代表2条消息,下一次拉取的话就从offset+2条消息开始拉
                         nextBeginOffset = offset + (i / ConsumeQueue.CQ_STORE_UNIT_SIZE);
 
                         long diff = maxOffsetPy - maxPhyOffsetPulling;

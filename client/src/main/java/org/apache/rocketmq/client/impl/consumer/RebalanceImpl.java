@@ -326,6 +326,14 @@ public abstract class RebalanceImpl {
         }
     }
 
+    /**
+     * remove的时候会处理消费位移将其进行持久化
+     * 新处理的queue则read_from_store然后进行消息拉取,消息拉取拉哪些消息决定权还是在消费端,服务端给出的仅仅是下次要拉取的消息位置,因为服务端一次给消息是给几十条消息,但是这批消息的起始位移一定是消费端指定好的
+     * @param topic
+     * @param mqSet 分配给自己的messageQueue
+     * @param isOrder
+     * @return
+     */
     private boolean updateProcessQueueTableInRebalance(final String topic, final Set<MessageQueue> mqSet,
         final boolean isOrder) {
         boolean changed = false;
@@ -350,7 +358,9 @@ public abstract class RebalanceImpl {
                             break;
                         case CONSUME_PASSIVELY:
                             pq.setDropped(true);
+                            //remove的时候会处理消费位移将其进行持久化
                             if (this.removeUnnecessaryMessageQueue(mq, pq)) {
+                                //有一些队列不再分配给自己了
                                 it.remove();
                                 changed = true;
                                 log.error("[BUG]doRebalance, {}, remove unnecessary mq, {}, because pull is pause, so try to fixed it",
@@ -366,6 +376,7 @@ public abstract class RebalanceImpl {
 
         List<PullRequest> pullRequestList = new ArrayList<PullRequest>();
         for (MessageQueue mq : mqSet) {
+            //这是一个新的队列,之前不归自己处理
             if (!this.processQueueTable.containsKey(mq)) {
                 if (isOrder && !this.lock(mq)) {
                     log.warn("doRebalance, {}, add a new mq failed, {}, because lock failed", consumerGroup, mq);
@@ -377,6 +388,7 @@ public abstract class RebalanceImpl {
 
                 long nextOffset = -1L;
                 try {
+                    //读的是远程 read_from_store,即broker的已提交位移
                     nextOffset = this.computePullFromWhereWithException(mq);
                 } catch (Exception e) {
                     log.info("doRebalance, {}, compute offset failed, {}", consumerGroup, mq);
@@ -391,6 +403,8 @@ public abstract class RebalanceImpl {
                         log.info("doRebalance, {}, add a new mq, {}", consumerGroup, mq);
                         PullRequest pullRequest = new PullRequest();
                         pullRequest.setConsumerGroup(consumerGroup);
+                        //从已提交位移处开始拉消息,丢到pullRequest请求队列后,还会随着拉取任务把位移也提交掉,也就是说最普通的负载均衡并不会处理什么位移
+                        //TODO push模式的推,会不会把位移覆盖掉。
                         pullRequest.setNextOffset(nextOffset);
                         pullRequest.setMessageQueue(mq);
                         pullRequest.setProcessQueue(pq);

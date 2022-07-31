@@ -541,6 +541,11 @@ public class ConsumeQueue {
         }
     }
 
+    /**
+     *
+     * @param startIndex 消息条数位置,比如第三条消息,第四条消息，对应到consumeQueue中需要乘一个queue的最小单元既20字节 startIndex * CQ_STORE_UNIT_SIZE 才是consumeQueue的物理偏移量
+     * @return
+     */
     public SelectMappedBufferResult getIndexBuffer(final long startIndex) {
         int mappedFileSize = this.mappedFileSize;
         long offset = startIndex * CQ_STORE_UNIT_SIZE;

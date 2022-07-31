@@ -1081,6 +1081,7 @@ public class MQClientInstance {
             }
 
             try {
+                //上面虽然drop  掉了,但是还是可能有其他线程已经走过判断代码开始提交offset了,这里10秒是在wait那几个线程吧,但是10秒准吗?只能说降低概率吧。
                 TimeUnit.SECONDS.sleep(10);
             } catch (InterruptedException e) {
             }
@@ -1091,8 +1092,12 @@ public class MQClientInstance {
                 Long offset = offsetTable.get(mq);
                 if (topic.equals(mq.getTopic()) && offset != null) {
                     try {
+                        //就算上面有漏网之鱼的线程已经提交过位移,这里这句话我们可以把位移强制修正回来。
+                        //但是这依然不是完全准,比如这里先提交位移,然后漏网的消费线程才开始提交本地位移。会把我们的覆盖掉,这个概率估计可以无视把？
                         consumer.updateConsumeOffset(mq, offset);
                         consumer.getRebalanceImpl().removeUnnecessaryMessageQueue(mq, processQueueTable.get(mq));
+                        //这句很关键,把processQueue都移除,等下resume进行负载均衡时候就都认为都是刚分配给自己的messageQueue来发起全新的PullRequest了,
+                        //但是pullRequest队列好像也没清理掉啊,如果还存在历史pullRequest在队列中,会导致上一个request带回来新的nextBeginOffset
                         iterator.remove();
                     } catch (Exception e) {
                         log.warn("reset offset failed. group={}, {}", group, mq, e);

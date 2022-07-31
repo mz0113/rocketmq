@@ -210,6 +210,10 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
         this.offsetStore = offsetStore;
     }
 
+    /**
+     * 消息拉取拉哪些消息决定权还是在消费端,服务端给出的仅仅是下次要拉取的消息位置,因为服务端一次给消息是给几十条消息,但是这批消息的起始位移一定是消费端指定好的
+     * @param pullRequest
+     */
     public void pullMessage(final PullRequest pullRequest) {
         final ProcessQueue processQueue = pullRequest.getProcessQueue();
         if (processQueue.isDropped()) {
@@ -312,8 +316,10 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                     pullResult = DefaultMQPushConsumerImpl.this.pullAPIWrapper.processPullResult(pullRequest.getMessageQueue(), pullResult,
                         subscriptionData);
 
+                    //OK,现在我们拉了一批消息下来,服务端也给出了下次要拉取的位置 pullResult.getNextBeginOffset()
                     switch (pullResult.getPullStatus()) {
                         case FOUND:
+                            //刚才请求的消息拉取起始位移是 prevRequestOffset
                             long prevRequestOffset = pullRequest.getNextOffset();
                             pullRequest.setNextOffset(pullResult.getNextBeginOffset());
                             long pullRT = System.currentTimeMillis() - beginTimestamp;
@@ -322,6 +328,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
 
                             long firstMsgOffset = Long.MAX_VALUE;
                             if (pullResult.getMsgFoundList() == null || pullResult.getMsgFoundList().isEmpty()) {
+                                //再拉一下
                                 DefaultMQPushConsumerImpl.this.executePullRequestImmediately(pullRequest);
                             } else {
                                 firstMsgOffset = pullResult.getMsgFoundList().get(0).getQueueOffset();
@@ -330,12 +337,14 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                                     pullRequest.getMessageQueue().getTopic(), pullResult.getMsgFoundList().size());
 
                                 boolean dispatchToConsume = processQueue.putMessage(pullResult.getMsgFoundList());
+                                //提交到消费请求队列中,交给listener进行消费
                                 DefaultMQPushConsumerImpl.this.consumeMessageService.submitConsumeRequest(
                                     pullResult.getMsgFoundList(),
                                     processQueue,
                                     pullRequest.getMessageQueue(),
                                     dispatchToConsume);
 
+                                //继续拉取
                                 if (DefaultMQPushConsumerImpl.this.defaultMQPushConsumer.getPullInterval() > 0) {
                                     DefaultMQPushConsumerImpl.this.executePullRequestLater(pullRequest,
                                         DefaultMQPushConsumerImpl.this.defaultMQPushConsumer.getPullInterval());
@@ -344,6 +353,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                                 }
                             }
 
+                            //刚才请求的位移假如是500,现在拉回来的消息的起始位移居然是200,那显然有问题,或者下次要求拉取的位移比刚才请求的还小,就很奇怪,理论不会发生把。
                             if (pullResult.getNextBeginOffset() < prevRequestOffset
                                 || firstMsgOffset < prevRequestOffset) {
                                 log.warn(
@@ -358,6 +368,7 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                         case NO_MATCHED_MSG:
                             pullRequest.setNextOffset(pullResult.getNextBeginOffset());
 
+                            //也就是说刚才请求的起始位移+32条默认消息量下并没有符合tag hashcode的消息,那就从32条之后（pullResult.getNextBeginOffset()）重新拉消息
                             DefaultMQPushConsumerImpl.this.correctTagsOffset(pullRequest);
 
                             DefaultMQPushConsumerImpl.this.executePullRequestImmediately(pullRequest);
@@ -365,6 +376,8 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                         case OFFSET_ILLEGAL:
                             log.warn("the pull request offset illegal, {} {}",
                                 pullRequest.toString(), pullResult.toString());
+
+                            //位移非法,同时broker给出了下次要从哪里拉消息的位移下标
                             pullRequest.setNextOffset(pullResult.getNextBeginOffset());
 
                             pullRequest.getProcessQueue().setDropped(true);
@@ -373,11 +386,14 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
                                 @Override
                                 public void run() {
                                     try {
+                                        //位移非法的话,重新更新consumer的位移,使用服务端给出的下次拉取消息偏移量作为已提交位移进行拉取
                                         DefaultMQPushConsumerImpl.this.offsetStore.updateOffset(pullRequest.getMessageQueue(),
                                             pullRequest.getNextOffset(), false);
 
+                                        //持久化一下
                                         DefaultMQPushConsumerImpl.this.offsetStore.persist(pullRequest.getMessageQueue());
 
+                                        //为什么要移除这个queue呢?是因为上面要 pullRequest.getProcessQueue().setDropped(true); 吗？
                                         DefaultMQPushConsumerImpl.this.rebalanceImpl.removeProcessQueue(pullRequest.getMessageQueue());
 
                                         log.warn("fix the pull request offset, {}", pullRequest);
@@ -430,6 +446,8 @@ public class DefaultMQPushConsumerImpl implements MQConsumerInner {
             classFilter // class filter
         );
         try {
+            //可以了解到的是,如果消费者没有把所有queue都drop掉,然后重新发起自己的PullRequest请求,那么即使更新了已提交消费位移,也不会用已提交消费位移来作为下次的待拉取偏移量
+            //这可以通过doRebalanced 来重置待拉取位移,因为负载均衡时候会把所有queue drop掉,然后重新add new queue ,使用已提交位移作为待拉取偏移量进行拉取。
             this.pullAPIWrapper.pullKernelImpl(
                 pullRequest.getMessageQueue(),
                 subExpression,
