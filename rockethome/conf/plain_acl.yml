@@ -1,0 +1,32 @@
+globalWhiteRemoteAddresses:
+- 127.0.0.1
+- 192.168.188.1
+accounts:
+- accessKey: RocketMQ
+  secretKey: 1234567
+  whiteRemoteAddress: null
+  admin: false
+  defaultTopicPerm: PUB
+  defaultGroupPerm: DENY
+  groupPerms:
+  - acltestgrp=SUB
+  topicPerms:
+  - acltest=PUB|SUB
+- accessKey: admin12
+  secretKey: 12345678
+  whiteRemoteAddress: null
+  admin: true
+- accessKey: RocketMQAdmin
+  secretKey: '1235465'
+  admin: true
+  defaultTopicPerm: PUB
+  defaultGroupPerm: DENY
+  topicPerms:
+  - topicA=DENY
+  - topicD=SUB
+  groupPerms:
+  - groupD=DENY
+  - groupB=SUB
+dataVersion:
+- counter: 1
+  timestamp: 1648880088387
