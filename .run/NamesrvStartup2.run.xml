@@ -1,7 +1,7 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="NamesrvStartup2" type="Application" factoryName="Application">
     <envs>
-      <env name="ROCKETMQ_HOME" value="E:\idea_wp\rocketmq\rockethome\" />
+      <env name="ROCKETMQ_HOME" value="D:\workspace\rocketmq-github\rocketmq\rockethome\" />
     </envs>
     <option name="MAIN_CLASS_NAME" value="org.apache.rocketmq.namesrv.NamesrvStartup" />
     <module name="rocketmq-namesrv" />

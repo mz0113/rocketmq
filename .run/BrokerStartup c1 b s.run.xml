@@ -1,11 +1,11 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="BrokerStartup c1 b s" type="Application" factoryName="Application">
     <envs>
-      <env name="ROCKETMQ_HOME" value="E:\idea_wp\rocketmq\rockethome\" />
+      <env name="ROCKETMQ_HOME" value="D:\workspace\rocketmq-github\rocketmq\rockethome\" />
     </envs>
     <option name="MAIN_CLASS_NAME" value="org.apache.rocketmq.broker.BrokerStartup" />
     <module name="rocketmq-broker" />
-    <option name="PROGRAM_PARAMETERS" value="-c E:\idea_wp\rocketmq\rockethome\conf\brokerc1bs.conf" />
+    <option name="PROGRAM_PARAMETERS" value="-c D:\workspace\rocketmq-github\rocketmq\rockethome\conf\brokerc1bs.conf" />
     <option name="VM_PARAMETERS" value="-Xmx700M" />
     <extension name="coverage">
       <pattern>
