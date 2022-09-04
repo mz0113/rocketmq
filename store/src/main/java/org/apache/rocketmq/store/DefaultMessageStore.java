@@ -903,7 +903,7 @@ public class DefaultMessageStore implements MessageStore {
 
     private long getStoreTime(SelectMappedBufferResult result) {
         if (result != null) {
-            try {
+            try
                 final long phyOffset = result.getByteBuffer().getLong();
                 final int size = result.getByteBuffer().getInt();
                 long storeTime = this.getCommitLog().pickupStoreTimestamp(phyOffset, size);
