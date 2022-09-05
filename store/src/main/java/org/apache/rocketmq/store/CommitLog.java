@@ -96,8 +96,10 @@ public class CommitLog {
         this.defaultMessageStore = defaultMessageStore;
 
         if (FlushDiskType.SYNC_FLUSH == defaultMessageStore.getMessageStoreConfig().getFlushDiskType()) {
+            //同步刷盘
             this.flushCommitLogService = new GroupCommitService();
         } else {
+            //异步刷盘的话就是定时任务刷盘 默认500毫秒flush一次
             this.flushCommitLogService = new FlushRealTimeService();
         }
 
@@ -850,12 +852,14 @@ public class CommitLog {
         if (FlushDiskType.SYNC_FLUSH == this.defaultMessageStore.getMessageStoreConfig().getFlushDiskType()) {
             final GroupCommitService service = (GroupCommitService) this.flushCommitLogService;
             if (messageExt.isWaitStoreMsgOK()) {
+                //返回一个未完成的CompletableFuture给外面进行阻塞
                 GroupCommitRequest request = new GroupCommitRequest(result.getWroteOffset() + result.getWroteBytes(),
                         this.defaultMessageStore.getMessageStoreConfig().getSyncFlushTimeout());
                 flushDiskWatcher.add(request);
                 service.putRequest(request);
                 return request.future();
             } else {
+                //立刻唤醒线程去刷盘(当然其实也看刷盘间隔。。。)，然后直接返回
                 service.wakeup();
                 return CompletableFuture.completedFuture(PutMessageStatus.PUT_OK);
             }
@@ -863,8 +867,12 @@ public class CommitLog {
         // Asynchronous flush
         else {
             if (!this.defaultMessageStore.getMessageStoreConfig().isTransientStorePoolEnable()) {
+                //没开启堆外缓存的话,则是flush，同步和异步还是不同的，同步是groupFlushCommitLogService，异步就是单纯的定时刷，参见上面类型强转
+                //  (GroupCommitService) this.flushCommitLogService
+                //wakeup就是立刻唤醒线程去执行刷盘的意思
                 flushCommitLogService.wakeup();
             } else  {
+                // flush message to FileChannel
                 commitLogService.wakeup();
             }
             return CompletableFuture.completedFuture(PutMessageStatus.PUT_OK);
@@ -1006,6 +1014,9 @@ public class CommitLog {
         protected static final int RETRY_TIMES_OVER = 10;
     }
 
+    /**
+     * 定时commit
+     */
     class CommitRealTimeService extends FlushCommitLogService {
 
         private long lastCommitTimestamp = 0;
@@ -1059,6 +1070,9 @@ public class CommitLog {
         }
     }
 
+    /**
+     * 定时flush
+     */
     class FlushRealTimeService extends FlushCommitLogService {
         private long lastFlushTimestamp = 0;
         private long printTimes = 0;
@@ -1170,6 +1184,7 @@ public class CommitLog {
 
     /**
      * GroupCommit Service
+     * 定时按组刷
      */
     class GroupCommitService extends FlushCommitLogService {
         private volatile LinkedList<GroupCommitRequest> requestsWrite = new LinkedList<GroupCommitRequest>();
@@ -1208,6 +1223,7 @@ public class CommitLog {
                         flushOK = CommitLog.this.mappedFileQueue.getFlushedWhere() >= req.getNextOffset();
                     }
 
+                    //这里让这个 flushOKFuture complete了，那边的阻塞自然就解开了
                     req.wakeupCustomer(flushOK ? PutMessageStatus.PUT_OK : PutMessageStatus.FLUSH_DISK_TIMEOUT);
                 }
 
