@@ -43,6 +43,7 @@ import org.apache.rocketmq.store.util.LibC;
 import sun.nio.ch.DirectBuffer;
 
 public class MappedFile extends ReferenceResource {
+    //一个标准页大小是4KB
     public static final int OS_PAGE_SIZE = 1024 * 4;
     protected static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
 
@@ -56,6 +57,7 @@ public class MappedFile extends ReferenceResource {
     protected FileChannel fileChannel;
     /**
      * Message will put to here first, and then reput to FileChannel if writeBuffer is not null.
+     * 这是DirectWriteBuffer 直接内存缓冲区
      */
     protected ByteBuffer writeBuffer = null;
     protected TransientStorePool transientStorePool = null;
@@ -91,6 +93,8 @@ public class MappedFile extends ReferenceResource {
     public static void clean(final ByteBuffer buffer) {
         if (buffer == null || !buffer.isDirect() || buffer.capacity() == 0)
             return;
+
+        //堆外内存清理
         invoke(invoke(viewed(buffer), "cleaner"), "clean");
     }
 
@@ -207,6 +211,7 @@ public class MappedFile extends ReferenceResource {
         int currentPos = this.wrotePosition.get();
 
         if (currentPos < this.fileSize) {
+            //区分directBuffer 还是 writeBuffer
             ByteBuffer byteBuffer = writeBuffer != null ? writeBuffer.slice() : this.mappedByteBuffer.slice();
             byteBuffer.position(currentPos);
             AppendMessageResult result;
@@ -279,13 +284,16 @@ public class MappedFile extends ReferenceResource {
     public int flush(final int flushLeastPages) {
         if (this.isAbleToFlush(flushLeastPages)) {
             if (this.hold()) {
+                //如果directBuffer不为空，则使用committedPosition,这个committedPosition是已从directBuffer写入到fileChannel的指针
                 int value = getReadPosition();
 
                 try {
                     //We only append data to fileChannel or mappedByteBuffer, never both.
                     if (writeBuffer != null || this.fileChannel.position() != 0) {
+                        //刷盘到磁盘上，强制刷盘 将pageCache刷到磁盘
                         this.fileChannel.force(false);
                     } else {
+                        //directBuffer模式下，则是用mmap来刷盘？
                         this.mappedByteBuffer.force();
                     }
                 } catch (Throwable e) {
@@ -304,11 +312,14 @@ public class MappedFile extends ReferenceResource {
 
     public int commit(final int commitLeastPages) {
         if (writeBuffer == null) {
+            //writeBuffer如果为空，直接返回wrotePosition指针，无须执行commit操作，表明commit操作主体是writeBuffer
             //no need to commit data to file channel, so just regard wrotePosition as committedPosition.
             return this.wrotePosition.get();
         }
+        //判断是否有足够多的脏页数量 > commitLeastPages 才需要提交
         if (this.isAbleToCommit(commitLeastPages)) {
             if (this.hold()) {
+                //从writeBuffer写入fileChannel,数据内容为buffer中writePos和lastCommittedPosition的中间数据
                 commit0();
                 this.release();
             } else {
@@ -331,9 +342,12 @@ public class MappedFile extends ReferenceResource {
 
         if (writePos - lastCommittedPosition > 0) {
             try {
+                //java.nio.ByteBuffer类的slice()方法用于创建一个新的字节缓冲区，其内容是给定缓冲区内容的共享子序列。
+                //ByteBuffer使用技巧：slice（）方法创建一个共享缓存区，与原先的ByteBuffer共享内存但维护一套独立的指针（position、mark、limit）。
                 ByteBuffer byteBuffer = writeBuffer.slice();
                 byteBuffer.position(lastCommittedPosition);
                 byteBuffer.limit(writePos);
+                //写入到fileChannel中，目前为止还不知道为啥要分开，而且为啥不是mmap映射来写入呢？那mmap啥时候用了
                 this.fileChannel.position(lastCommittedPosition);
                 this.fileChannel.write(byteBuffer);
                 this.committedPosition.set(writePos);
@@ -365,7 +379,7 @@ public class MappedFile extends ReferenceResource {
         if (this.isFull()) {
             return true;
         }
-
+        //比较wrotePosition（当前writeBuffe的写指针）与上一次提交的指针（committedPosition）的差值，除以OS_PAGE_SIZE得到当前脏页的数量
         if (commitLeastPages > 0) {
             return ((write / OS_PAGE_SIZE) - (flush / OS_PAGE_SIZE)) >= commitLeastPages;
         }
@@ -480,6 +494,10 @@ public class MappedFile extends ReferenceResource {
 
     /**
      * @return The max position which have valid data
+     *
+     * 获取当前文件最大的可读指针。如果writeBuffer为空，则直接返回当前的写指针；
+     * 如果writeBuffer不为空，则返回上一次提交的指针。
+     * 在MappedFile设计中，只有提交了的数据（写入到MappedByteBuffer或FileChannel中的数据）才是安全的数据。
      */
     public int getReadPosition() {
         return this.writeBuffer == null ? this.wrotePosition.get() : this.committedPosition.get();
@@ -495,9 +513,11 @@ public class MappedFile extends ReferenceResource {
         int flush = 0;
         long time = System.currentTimeMillis();
         for (int i = 0, j = 0; i < this.fileSize; i += MappedFile.OS_PAGE_SIZE, j++) {
+            //每一页都写一个字节，那么就等于该页脏了，不需要全都写一遍
             byteBuffer.put(i, (byte) 0);
             // force flush when flush disk type is sync
             if (type == FlushDiskType.SYNC_FLUSH) {
+                //已force的页数>要force的页数就force？
                 if ((i / OS_PAGE_SIZE) - (flush / OS_PAGE_SIZE) >= pages) {
                     flush = i;
                     mappedByteBuffer.force();
@@ -552,11 +572,15 @@ public class MappedFile extends ReferenceResource {
         this.firstCreateInQueue = firstCreateInQueue;
     }
 
+    /**
+     * 其可以将进程使用的部分或者全部的地址空间锁定在物理内存中，防止其被交换到swap空间。对于RocketMQ这种的高吞吐量的分布式消息队列来说，追求的是消息读写低延迟，那么肯定希望尽可能地多使用物理内存，提高数据读写访问的操作效率
+     */
     public void mlock() {
         final long beginTime = System.currentTimeMillis();
         final long address = ((DirectBuffer) (this.mappedByteBuffer)).address();
         Pointer pointer = new Pointer(address);
         {
+            //Native.loadLibrary(Platform.isWindows() ? "msvcrt" : "c", LibC.class)
             int ret = LibC.INSTANCE.mlock(pointer, new NativeLong(this.fileSize));
             log.info("mlock {} {} {} ret = {} time consuming = {}", address, this.fileName, this.fileSize, ret, System.currentTimeMillis() - beginTime);
         }

@@ -48,6 +48,7 @@ public class TransientStorePool {
      */
     public void init() {
         for (int i = 0; i < poolSize; i++) {
+            //这里就直接是个fileSize大小的byteBuffer啊，所以这个堆外内存buffer才能和commitLog对应起来，他们的读写指针都是相同大小的
             ByteBuffer byteBuffer = ByteBuffer.allocateDirect(fileSize);
 
             final long address = ((DirectBuffer) byteBuffer).address();

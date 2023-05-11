@@ -47,6 +47,7 @@ public abstract class ReferenceResource {
             this.release();
         } else if (this.getRefCount() > 0) {
             if ((System.currentTimeMillis() - this.firstShutdownTimestamp) >= intervalForcibly) {
+                //每执行一次，将引用数减少1000，直到引用数小于0时通过执行realse方法释放资源
                 this.refCount.set(-1000 - this.getRefCount());
                 this.release();
             }

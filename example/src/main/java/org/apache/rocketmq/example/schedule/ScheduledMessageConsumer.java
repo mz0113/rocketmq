@@ -29,6 +29,7 @@ public class ScheduledMessageConsumer {
     public static void main(String[] args) throws Exception {
         // Instantiate message consumer
         DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("ExampleConsumer");
+        consumer.setNamesrvAddr("127.0.0.1:9876");
         // Subscribe topics
         consumer.subscribe("TestTopic", "*");
         // Register message listener
@@ -38,7 +39,7 @@ public class ScheduledMessageConsumer {
                 for (MessageExt message : messages) {
                     // Print approximate delay time period
                     System.out.printf("Receive message[msgId=%s %d  ms later]\n", message.getMsgId(),
-                            System.currentTimeMillis() - message.getStoreTimestamp());
+                            System.currentTimeMillis() - Long.valueOf(message.getUserProperty("time")));
                 }
                 return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
             }
