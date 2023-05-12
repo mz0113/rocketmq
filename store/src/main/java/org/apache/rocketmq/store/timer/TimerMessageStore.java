@@ -1236,7 +1236,9 @@ public class TimerMessageStore {
         }
 
     }
-
+    /**
+     * 消费事件轮Topic,将该Topic中新增消息获取出来,送往enqueuePutQueue中
+     */
     class TimerEnqueueGetService extends ServiceThread {
 
         @Override public String getServiceName() {
@@ -1345,6 +1347,10 @@ public class TimerMessageStore {
         }
     }
 
+
+    /**
+     * 从TimerLog中拿出已到期消息
+     */
     class TimerDequeueGetService extends ServiceThread {
 
         @Override public String getServiceName() {
@@ -1389,6 +1395,15 @@ public class TimerMessageStore {
         }
     }
 
+    /**
+     * 延时消息到期后,dequeuePutQueue会被放入request,用于将消息投递到真实Topic中
+     * 该Service消费dequeuePutQueue的请求
+     *
+     * Dequeue是指从timerLog中移除,即到期
+     * Put是指重新put真实消息到commitLog中
+     *
+     * {@link #doPut(MessageExtBrokerInner, boolean)}
+     */
     class TimerDequeuePutMessageService extends AbstractStateService {
 
         @Override public String getServiceName() {
