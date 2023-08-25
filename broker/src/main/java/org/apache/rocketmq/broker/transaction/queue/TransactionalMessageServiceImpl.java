@@ -163,9 +163,16 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                     continue;
                 }
 
+                //也就是说,这条opMessage没有关联任何half消息了,或者说关联的half消息都处理完了
                 List<Long> doneOpOffset = new ArrayList<>();
-                HashMap<Long, Long> removeMap = new HashMap<>();
-                HashMap<Long, HashSet<Long>> opMsgMap = new HashMap<Long, HashSet<Long>>();
+
+                //意思就是说这条半消息对应的op消息是哪条
+                HashMap<Long/*halfOffset*/, Long/*opOffsetSet*/> removeMap = new HashMap<>();
+
+                //这个意思是就是这条op消息涉及哪些half消息
+                HashMap<Long/*opOffset*/, HashSet<Long/*halfOffset*/>> opMsgMap = new HashMap<Long, HashSet<Long>>();
+
+                //但是问题是这个opOffset一直在递增,
                 PullResult pullResult = fillOpRemoveMap(removeMap, opQueue, opOffset, halfOffset, opMsgMap, doneOpOffset);
                 if (null == pullResult) {
                     log.error("The queue={} check msgOffset={} with opOffset={} failed, pullResult is null",
@@ -185,13 +192,13 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                         log.info("Queue={} process time reach max={}", messageQueue, MAX_PROCESS_TIME_LIMIT);
                         break;
                     }
-                    if (removeMap.containsKey(i)) {
+                    if (removeMap/*half:op*/.containsKey(i)) { //但是这个有没有可能确实没拉到,因为只拉取32条op消息 //todo 有没有可能half对应的op在前面就被拉过了
                         log.debug("Half offset {} has been committed/rolled back", i);
-                        Long removedOpOffset = removeMap.remove(i);
-                        opMsgMap.get(removedOpOffset).remove(i);
-                        if (opMsgMap.get(removedOpOffset).size() == 0) {
-                            opMsgMap.remove(removedOpOffset);
-                            doneOpOffset.add(removedOpOffset);
+                        Long removedOpOffset = removeMap.remove(i);//表示这条half消息得到处理了
+                        opMsgMap/*op:half*/.get(removedOpOffset).remove(i);//取消这条op消息关联的该条half消息,因为这条half认为得到处理了
+                        if (opMsgMap.get(removedOpOffset).size() == 0) { //意思就是说这条op消息关联的half消息都被处理完了
+                            opMsgMap.remove(removedOpOffset);//所以不再管理这条opMsg了,从map中移除即可
+                            doneOpOffset.add(removedOpOffset);//表示这条opMsg关联的half消息都处理完了
                         }
                     } else {
                         GetResult getResult = getHalfMsg(messageQueue, i);
@@ -256,30 +263,72 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
 
                         long valueOfCurrentMinusBorn = System.currentTimeMillis() - msgExt.getBornTimestamp();
                         long checkImmunityTime = transactionTimeout;
+
+                        //那这个逻辑基本上认为不可能走的到?因为压根不会放PROPERTY_CHECK_IMMUNITY_TIME_IN_SECONDS进去啊,当然除非是用户手动指定就可以
                         String checkImmunityTimeStr = msgExt.getUserProperty(MessageConst.PROPERTY_CHECK_IMMUNITY_TIME_IN_SECONDS);
                         if (null != checkImmunityTimeStr) {
+                            //如果是被推迟过后的half消息
                             checkImmunityTime = getImmunityTime(checkImmunityTimeStr, transactionTimeout);
                             if (valueOfCurrentMinusBorn < checkImmunityTime) {
                                 if (checkPrepareQueueOffset(removeMap, doneOpOffset, msgExt, checkImmunityTimeStr)) {
-                                    newOffset = i + 1;
+                                    newOffset = i + 1; //这条half消息太新了,还不能回查,所以要重新put到queue中,然后跳过,因此 ConsumerHalfQueueOffset+1
                                     i++;
                                     continue;
                                 }
                             }
                         } else {
+                            //如果没有手动指定过PROPERTY_CHECK_IMMUNITY_TIME_IN_SECONDS
                             if (0 <= valueOfCurrentMinusBorn && valueOfCurrentMinusBorn < checkImmunityTime) {
                                 log.debug("New arrived, the miss offset={}, check it later checkImmunity={}, born={}", i,
                                     checkImmunityTime, new Date(msgExt.getBornTimestamp()));
+
+                                //这里直接是break,会中断循环.啥意思呢,当前这条消息是最小的offset,它都没到处理时间,后续的消息自然更没到.所以可以直接break掉
                                 break;
                             }
                         }
+                        //反正就是最多32条消息嘛
                         List<MessageExt> opMsg = pullResult == null ? null : pullResult.getMsgFoundList();
+
+
+                        //如果opMsg为null说明这没有最新的opMsg了,此时发起回查非常合理 ,应该就是随便判断以下了,条件肯定满足,否则上面就break了不是么
+                        //opMsg == null && valueOfCurrentMinusBorn > checkImmunityTime
                         boolean isNeedCheck = opMsg == null && valueOfCurrentMinusBorn > checkImmunityTime
-                            || opMsg != null && opMsg.get(opMsg.size() - 1).getBornTimestamp() - startTime > transactionTimeout
+                                /*
+                                发送具体的事务回查机制，这里用一个线程池来异步发送回查消息，为了回查进度保存的简化，这里只要发送了回查消息，当前回查进度会向前推动，
+                                如果回查失败，上一步骤新增的消息将可以再次发送回查消息，那如果回查消息发送成功，那会不会下一次又重复发送回查消息呢？
+                                这个可以根据OP队列中的消息来判断是否重复，如果回查消息发送成功并且消息服务器完成提交或回滚操作，这条消息会发送到OP队列中,
+                                然后首先会通过fillOpRemoveMap根据处理进度获取一批已处理的消息，来与消息判断是否重复，
+                                由于fillopRemoveMap一次只拉32条消息，那又如何保证一定能拉取到与当前消息的处理记录呢？
+                                其实就是通过代码@10，如果此批消息最后一条未超过事务延迟消息，则继续拉取更多消息进行判断（@12）和(@14),op队列也会随着回查进度的推进而推进。
+                                */
+
+                                /**
+                                 * -  opMsg == null && valueOfCurrentMinusBorn > checkImmunityTime ：如果事务消息列表  opMsg  为空，并且当前消息的事务开始时间差大于事务的免检时间（checkImmunityTime），则需要进行事务回查。
+                                 * -  opMsg != null && opMsg.get(opMsg.size() - 1).getBornTimestamp() - startTime > transactionTimeout ：如果事务消息列表  opMsg  不为空，并且最后一条消息的产生时间与事务开始时间的差大于事务超时时间（transactionTimeout），则需要进行事务回查。
+                                 * -  valueOfCurrentMinusBorn <= -1 ：如果当前消息的事务开始时间差小于等于-1，表示事务消息的发送时间无效或异常，也需要进行事务回查。
+                                 */
+
+                                //startTime可以认为是事务开始时间,因为我们开始处理Half消息,意味着肯定事务开始了,只是有点误差,但是可以明确事务一定开始了
+                                //然后拉了一次opMsg,结果拉出来最后一条消息距离事务开始时间已经过去6秒钟了
+                                //考虑如果提交的非常及时的话,应该是startTime一开始,opMsg就紧随其后来了.两者几乎时间一致.所以就不会进入check
+                                //但是如果提交的不及时,那么opMsg来的非常晚,像这里晚于6秒钟,就需要回查.
+                                //注意我是startTime开始拉的,拉了第一批,这第一批的opMsg的bornTime最大也不会大过startTime,否则如果>startTime,比如我00秒开始拉,结果拉到了01秒落文件的消息?那显然不可能,我怎么可能拉取到未来的opMsg
+                                //所以第一轮次时候,bornTime肯定小于等于startTime,所以这个条件不满足,isNeedCheck = false,会继续去fillOpRemoveMap拉opMsg
+                                //在后续的轮次中,startTime不变,然后bornTime肯定是单调递增,然后一直拉一直拉,直到已经过去6秒钟了(表现就是我已经拉到了bornTime-start>transTimeout的消息)
+                                //,居然还没拉到需要的opMsg(之前拉取的所有opMsg都与当前half消息尝试匹配了,只是没匹配到),此时就认为需要发起回查了.
+                                //所以话说回来,这个判断就是要保证事务开始6秒内所有的opMsg都要拉取到以便进行判断.因为如果不满足6秒就会一直拉嘛,条件不满足就走else分支了.
+                                || opMsg != null && opMsg.get(opMsg.size() - 1).getBornTimestamp() - startTime > transactionTimeout
+
+                                /*
+                                * 当 op 消息的集合为空，说明当前还没有收到让当前事务结束的通知，且超过了"免疫时间"，故回查
+                                  当前 op 消息最大偏移量的生成时间超过了"免疫时间"，说明该事务的提交消息可能丢失了，故回查
+                                  不启用 "免疫时间"
+                                * */
+
+                                //valueOfCurrentMinusBorn小于-1说明现在处理的慢了,消息是12:12秒落盘的,但是处理却是12:10秒,理论上也不太会发生吧.
                             || valueOfCurrentMinusBorn <= -1;
 
                         if (isNeedCheck) {
-
                             if (!putBackHalfMsgQueue(msgExt, i)) {
                                 continue;
                             }
@@ -290,6 +339,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                                     msgExt.getQueueOffset(), msgExt.getCommitLogOffset());
                             listener.resolveHalfMsg(msgExt);
                         } else {
+                            //拉取更多的opMsg , 可也就拉32条
                             nextOpOffset = pullResult != null ? pullResult.getNextBeginOffset() : nextOpOffset;
                             pullResult = fillOpRemoveMap(removeMap, opQueue, nextOpOffset,
                                     halfOffset, opMsgMap, doneOpOffset);
@@ -400,7 +450,8 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                         continue;
                     }
 
-                    removeMap.put(offsetValue, opMessageExt.getQueueOffset());
+                    //意思就是说这条半消息对应的op消息是哪条
+                    removeMap.put(offsetValue/*halfMessageOffset*/, opMessageExt.getQueueOffset()/*opMessageOffset*/);
                     set.add(offsetValue);
                 }
             } else {
@@ -408,8 +459,10 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
             }
 
             if (set.size() > 0) {
+                //这个意思是就是这条op消息涉及哪些half消息
                 opMsgMap.put(opMessageExt.getQueueOffset(), set);
             } else {
+                //也就是说,这条opMessage没有关联任何half消息,意味着不需要进行任何操作,忽略掉就行了.
                 doneOpOffset.add(opMessageExt.getQueueOffset());
             }
         }
@@ -428,19 +481,19 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
      * @param msgExt Half message
      * @return Return true if put success, otherwise return false.
      */
-    private boolean checkPrepareQueueOffset(HashMap<Long, Long> removeMap, List<Long> doneOpOffset,
+    private boolean checkPrepareQueueOffset(HashMap<Long/*half*/, Long/*op*/> removeMap, List<Long> doneOpOffset,
         MessageExt msgExt, String checkImmunityTimeStr) {
         String prepareQueueOffsetStr = msgExt.getUserProperty(MessageConst.PROPERTY_TRANSACTION_PREPARED_QUEUE_OFFSET);
-        if (null == prepareQueueOffsetStr) {
-            return putImmunityMsgBackToHalfQueue(msgExt);
+        if (null == prepareQueueOffsetStr) {/*注意的是这里Half消息可能也是再次经过推迟的Half消息,如果是推迟的Half消息,那么会存在PROPERTY_TRANSACTION_PREPARED_QUEUE_OFFSET这个值*/
+            return putImmunityMsgBackToHalfQueue(msgExt);//真正原始的half消息
         } else {
-            long prepareQueueOffset = getLong(prepareQueueOffsetStr);
+            long prepareQueueOffset = getLong(prepareQueueOffsetStr);/*原始half消息对应的offset*/
             if (-1 == prepareQueueOffset) {
                 return false;
             } else {
-                if (removeMap.containsKey(prepareQueueOffset)) {
+                if (removeMap.containsKey(prepareQueueOffset)) {/*这里removeMap不含最新的opMessage啊,所以可能匹配不到*/
                     long tmpOpOffset = removeMap.remove(prepareQueueOffset);
-                    doneOpOffset.add(tmpOpOffset);
+                    doneOpOffset.add(tmpOpOffset);/*这里咋不判断opMsgMap的size了了*/
                     log.info("removeMap contain prepareQueueOffset. real_topic={},uniqKey={},immunityTime={},offset={}",
                             msgExt.getUserProperty(MessageConst.PROPERTY_REAL_TOPIC),
                             msgExt.getUserProperty(MessageConst.PROPERTY_UNIQ_CLIENT_MESSAGE_ID_KEYIDX),
@@ -595,6 +648,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                 if (totalSize > transactionalMessageBridge.getBrokerController().getBrokerConfig().getTransactionOpMsgMaxSize()) {
                     this.transactionalOpBatchService.wakeup();
                 }
+                //如果添加成功了,就等后续批量落文件
                 return true;
             } else {
                 this.transactionalOpBatchService.wakeup();
@@ -602,6 +656,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
         } catch (InterruptedException ignore) {
         }
 
+        //否则强制让OpMessage落文件
         Message msg = getOpMessage(queueId, data);
         if (this.transactionalMessageBridge.writeOp(queueId, msg)) {
             log.warn("Force add remove op data. queueId={}", queueId);

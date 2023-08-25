@@ -258,13 +258,13 @@ public class TransactionalMessageBridge {
 
     public MessageExtBrokerInner renewImmunityHalfMessageInner(MessageExt msgExt) {
         MessageExtBrokerInner msgInner = renewHalfMessageInner(msgExt);
-        String queueOffsetFromPrepare = msgExt.getUserProperty(MessageConst.PROPERTY_TRANSACTION_PREPARED_QUEUE_OFFSET);
+        String queueOffsetFromPrepare = msgExt.getUserProperty(MessageConst.PROPERTY_TRANSACTION_PREPARED_QUEUE_OFFSET);/*当前Half消息的queueOffset,注意的是这里Half消息可能也是再次经过推迟的Half消息*/
         if (null != queueOffsetFromPrepare) {
             MessageAccessor.putProperty(msgInner, MessageConst.PROPERTY_TRANSACTION_PREPARED_QUEUE_OFFSET,
                     queueOffsetFromPrepare);
         } else {
             MessageAccessor.putProperty(msgInner, MessageConst.PROPERTY_TRANSACTION_PREPARED_QUEUE_OFFSET,
-                String.valueOf(msgExt.getQueueOffset()));
+                String.valueOf(msgExt.getQueueOffset()));/*满足这个条件的才是最原始的哪条Half消息*/
         }
 
         msgInner.setPropertiesString(MessageDecoder.messageProperties2String(msgInner.getProperties()));
